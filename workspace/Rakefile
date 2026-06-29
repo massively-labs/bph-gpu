@@ -1,0 +1,68 @@
+directory "dat"
+directory "plot"
+
+desc "run shocktube test"
+task :bench do
+  sh "time cargo run -p shocktube -- 500 100 2 0.15"
+end
+
+namespace :run do
+  desc "run shocktube test"
+  task :shocktube => "dat" do
+    sh "cargo run -p shocktube -- 500 1000 2 0.15 --out dat/shocktube.dat"
+  end
+
+  desc "run wallshock test"
+  task :wallshock => "dat" do
+    sh "cargo run -p wallshock -- 4000 1000 2 0.5 --out dat/wallshock.dat"
+  end
+
+  desc "run Sjogreen test"
+  task :sjogreen => "dat" do
+    sh "cargo run -p sjogreen -- 4000 1000 2 0.1 7 --out dat/sjogreen.dat"
+  end
+
+  desc "run Noh 2D test"
+  task :noh => "dat" do
+    sh "cargo run -p noh -- 100 100 2 0.5 --out dat/noh.dat"
+  end
+end
+
+$LOAD_PATH.push("draw")
+require "shocktube"
+require "wallshock"
+require "sjogreen"
+require "noh"
+
+namespace :draw do
+  desc "draw shocktube"
+  task :shocktube => "plot" do
+    Shocktube.draw
+  end
+
+  desc "draw wallshock"
+  task :wallshock => "plot" do
+    Wallshock.draw
+  end
+
+  desc "draw Sjogreen"
+  task :sjogreen => "plot" do
+    Sjogreen.draw
+  end
+
+  desc "draw Noh 2D"
+  task :noh => "plot" do
+    Noh.draw
+  end
+end
+
+desc "run+draw shocktube"
+task :shocktube => ["run:shocktube", "draw:shocktube"]
+desc "run+draw wallshock"
+task :wallshock => ["run:wallshock", "draw:wallshock"]
+desc "run+draw sjogreen"
+task :sjogreen => ["run:sjogreen", "draw:sjogreen"]
+desc "run+draw noh"
+task :noh => ["run:noh", "draw:noh"]
+
+task :all => [:shocktube, :wallshock, :sjogreen, :noh]

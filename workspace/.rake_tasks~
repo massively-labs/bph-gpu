@@ -1,0 +1,14 @@
+all
+bench
+dat
+draw:shocktube
+draw:sjogreen
+draw:wallshock
+noh
+plot
+run:shocktube
+run:sjogreen
+run:wallshock
+shocktube
+sjogreen
+wallshock

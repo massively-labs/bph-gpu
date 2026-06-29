@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "bph-gpu",
+    "experiments/noh",
+    "experiments/shocktube",
+    "experiments/sjogreen",
+    "experiments/wallshock",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/akiradeveloper/bph"
+
+[workspace.dependencies]
+massively = { git = "https://github.com/akiradeveloper/massively", tag = "v0.34" }
+clap = { version = "4", features = ["derive"] }
+cubecl = { git = "https://github.com/tracel-ai/cubecl", branch = "main", features = ["wgpu", "cuda", "hip"] }
+
+bph-gpu = { path = "bph-gpu" }
