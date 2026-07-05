@@ -2,41 +2,41 @@ use super::*;
 
 /// IN:  v=[1,2,3,4,5], idx=[0,0,2,2,2], k=3
 /// OUT: ([3,0,12], [2,0,3])
-pub fn reduce_by_bucket<R: Runtime, V, Sum>(
+pub fn reduce_by_bucket<R: Runtime, V, Sum, Output>(
     exec: &Executor<R>,
     idx: DeviceSlice<R, u32>,
     v: V,
-    zero: V::Item,
+    zero: Output::Item,
     sum: Sum,
-    k: u32,
-) -> (<V::Item as MItem<R>>::Vec, DeviceVec<R, u32>)
+    out: Output,
+    counts: DeviceSliceMut<R, u32>,
+) -> Result<(), massively::Error>
 where
-    V: MIter<R>,
-    Sum: ReductionOp<R, V::Item>,
+    Output: MIterMut<R>,
+    V: MIter<R, Item = Output::Item>,
+    Sum: ReductionOp<R, Output::Item>,
 {
-    let (SoA1(cell_idx), cell_v) = massively::reduce_by_key(
+    let cell_idx = exec.alloc::<(u32,)>(idx.len())?;
+    let cell_v = exec.alloc::<Output::Item>(massively::MIter::len(&v))?;
+    let n = massively::reduce_by_key(
         exec,
-        SoA1(idx.slice(..)),
+        Zip1(idx.slice(..)),
         v,
         massively::op::Equal,
         zero,
         sum,
-    )
-    .unwrap();
+        cell_idx.slice_mut(..),
+        cell_v.slice_mut(..),
+    )?;
 
-    let data = exec.alloc::<V::Item>(k).unwrap();
-    massively::fill(exec, zero, data.slice_mut(..)).unwrap();
     massively::scatter(
         exec,
-        cell_v.slice(..),
-        cell_idx.slice(..),
-        data.slice_mut(..),
-    )
-    .unwrap();
+        cell_v.slice(..n),
+        cell_idx.0.slice(..n),
+        out,
+    )?;
 
-    let counting = counting::bucket_counting(exec, idx, k);
-
-    (data, counting)
+    counting::bucket_counting(exec, idx, counts)
 }
 
 #[cfg(test)]
@@ -57,11 +57,21 @@ mod tests {
         let exec = super::test_executor();
         let idx = exec.to_device(&[0_u32, 0, 2, 2, 2]).unwrap();
         let v = exec.to_device(&[1_u32, 2, 3, 4, 5]).unwrap();
+        let sum = Zip1(exec.constant(3, 0_u32).unwrap());
+        let counts = exec.constant(3, 0_u32).unwrap();
 
-        let (SoA1(sum), counts) =
-            reduce_by_bucket(&exec, idx.slice(..), SoA1(v.slice(..)), (0,), SumU32, 3);
+        reduce_by_bucket(
+            &exec,
+            idx.slice(..),
+            Zip1(v.slice(..)),
+            (0,),
+            SumU32,
+            sum.slice_mut(..),
+            counts.slice_mut(..),
+        )
+        .unwrap();
 
-        assert_eq!(exec.to_host(&sum).unwrap(), vec![3, 0, 12]);
+        assert_eq!(exec.to_host(&sum.0).unwrap(), vec![3, 0, 12]);
         assert_eq!(exec.to_host(&counts).unwrap(), vec![2, 0, 3]);
     }
 }

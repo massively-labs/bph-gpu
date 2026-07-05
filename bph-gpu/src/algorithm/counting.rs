@@ -5,30 +5,36 @@ use super::*;
 pub fn bucket_counting<R: Runtime>(
     exec: &Executor<R>,
     idx: DeviceSlice<R, u32>,
-    k: u32,
-) -> DeviceVec<R, u32> {
-    let counting = exec.counting(k).unwrap();
+    out: DeviceSliceMut<R, u32>,
+) -> Result<(), massively::Error> {
+    let k = out.len();
+    let counting = exec.counting(k)?;
 
-    let begin = massively::lower_bound(
+    let begin = exec.constant(k, 0_u32)?;
+    massively::lower_bound(
         exec,
-        SoA1(idx.slice(..)),
-        SoA1(counting.slice(..)),
+        Zip1(idx.slice(..)),
+        Zip1(counting.slice(..)),
         OrderingU32,
-    )
-    .unwrap();
+        begin.slice_mut(..),
+    )?;
 
-    let end = massively::upper_bound(
+    let end = exec.constant(k, 0_u32)?;
+    massively::upper_bound(
         exec,
-        SoA1(idx.slice(..)),
-        SoA1(counting.slice(..)),
+        Zip1(idx.slice(..)),
+        Zip1(counting.slice(..)),
         OrderingU32,
+        end.slice_mut(..),
+    )?;
+
+    massively::transform(
+        exec,
+        Zip2(end.slice(..), begin.slice(..)),
+        CalcDiff,
+        (),
+        Zip1(out),
     )
-    .unwrap();
-
-    let SoA1(diff) =
-        massively::map(exec, SoA2(end.slice(..), begin.slice(..)), CalcDiff, ()).unwrap();
-
-    diff
 }
 
 struct OrderingU32;
@@ -57,8 +63,9 @@ mod tests {
     fn test_bucket_counting() {
         let exec = super::test_executor();
         let idx = exec.to_device(&[0_u32, 0, 2, 2, 2, 2]).unwrap();
+        let counts = exec.constant(3, 0_u32).unwrap();
 
-        let counts = bucket_counting(&exec, idx.slice(..), 3);
+        bucket_counting(&exec, idx.slice(..), counts.slice_mut(..)).unwrap();
 
         assert_eq!(exec.to_host(&counts).unwrap(), vec![2, 0, 4]);
     }

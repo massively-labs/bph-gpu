@@ -17,18 +17,31 @@ pub fn alloc_balanced_shell_rand<R: Runtime>(
         seed,
     );
 
-    let (SoA3(cell_sum_u, cell_sum_v, cell_sum_w), cell_cnt) = algorithm::reduce::reduce_by_bucket(
+    let Zip3(cell_sum_u, cell_sum_v, cell_sum_w) = Zip3(
+        exec.constant(k, 0_f32).unwrap(),
+        exec.constant(k, 0_f32).unwrap(),
+        exec.constant(k, 0_f32).unwrap(),
+    );
+    let cell_cnt = exec.constant(k, 0_u32).unwrap();
+    algorithm::reduce::reduce_by_bucket(
         exec,
         idx.slice(..),
-        SoA3(u.slice(..), v.slice(..), w.slice(..)),
+        Zip3(u.slice(..), v.slice(..), w.slice(..)),
         (0., 0., 0.),
         common::Add_F32_3,
-        k,
-    );
+        Zip3(
+            cell_sum_u.slice_mut(..),
+            cell_sum_v.slice_mut(..),
+            cell_sum_w.slice_mut(..),
+        ),
+        cell_cnt.slice_mut(..),
+    )
+    .unwrap();
 
-    let SoA3(cell_ave_u, cell_ave_v, cell_ave_w) = massively::map(
+    let Zip3(cell_ave_u, cell_ave_v, cell_ave_w) = exec.alloc::<(f32, f32, f32)>(k).unwrap();
+    massively::transform(
         exec,
-        SoA4(
+        Zip4(
             cell_sum_u.slice(..),
             cell_sum_v.slice(..),
             cell_sum_w.slice(..),
@@ -36,23 +49,34 @@ pub fn alloc_balanced_shell_rand<R: Runtime>(
         ),
         common::CellAve_F32_3,
         (),
+        Zip3(
+            cell_ave_u.slice_mut(..),
+            cell_ave_v.slice_mut(..),
+            cell_ave_w.slice_mut(..),
+        ),
     )
     .unwrap();
 
-    let SoA3(ave_u, ave_v, ave_w) = massively::permute(
+    let Zip3(ave_u, ave_v, ave_w) = exec.alloc::<(f32, f32, f32)>(idx.len()).unwrap();
+    massively::gather(
         exec,
-        SoA3(
+        Zip3(
             cell_ave_u.slice(..),
             cell_ave_v.slice(..),
             cell_ave_w.slice(..),
         ),
         idx.slice(..),
+        Zip3(
+            ave_u.slice_mut(..),
+            ave_v.slice_mut(..),
+            ave_w.slice_mut(..),
+        ),
     )
     .unwrap();
 
     massively::transform(
         exec,
-        SoA6(
+        Zip6(
             u.slice(..),
             v.slice(..),
             w.slice(..),
@@ -62,7 +86,7 @@ pub fn alloc_balanced_shell_rand<R: Runtime>(
         ),
         common::Sub_F32_3,
         (),
-        SoA3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
+        Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
 }
@@ -83,9 +107,10 @@ pub fn relax<R: Runtime>(
     // 1. Compute total energy and particle counts for each cell.
     // -----------------------------------------------------------------
 
-    let SoA1(total_e) = massively::map(
+    let Zip1(total_e) = exec.alloc::<(f32,)>(idx.len()).unwrap();
+    massively::transform(
         &exec,
-        SoA5(
+        Zip5(
             u.slice(..),
             v.slice(..),
             w.slice(..),
@@ -94,25 +119,47 @@ pub fn relax<R: Runtime>(
         ),
         calc_total_e::CalcTotalE,
         (),
+        Zip1(total_e.slice_mut(..)),
     )
     .unwrap();
 
-    let (SoA1(cell_sum_total_e), cell_cnt) = algorithm::reduce::reduce_by_bucket(
+    let Zip1(cell_sum_total_e) = Zip1(exec.constant(k, 0_f32).unwrap());
+    let cell_cnt = exec.constant(k, 0_u32).unwrap();
+    algorithm::reduce::reduce_by_bucket(
         exec,
-        idx,
-        SoA1(total_e.slice(..)),
+        idx.slice(..),
+        Zip1(total_e.slice(..)),
         (0.,),
         common::Add_F32_1,
-        k,
-    );
+        Zip1(cell_sum_total_e.slice_mut(..)),
+        cell_cnt.slice_mut(..),
+    )
+    .unwrap();
 
     // Relaxation models collisions by redistributing total energy into kinetic
     // and internal energy.
     // Cells with fewer than two particles cannot collide; redistributing their
     // energy would artificially lose energy.
-    let SoA1(collision_stencil) = {
-        let SoA1(tmp) = massively::permute(exec, SoA1(cell_cnt.slice(..)), idx).unwrap();
-        massively::map(exec, SoA1(tmp.slice(..)), IsCollidable, ()).unwrap()
+    let Zip1(collision_stencil) = {
+        let Zip1(tmp) = exec.alloc::<(u32,)>(idx.len()).unwrap();
+        massively::gather(
+            exec,
+            Zip1(cell_cnt.slice(..)),
+            idx.slice(..),
+            Zip1(tmp.slice_mut(..)),
+        )
+        .unwrap();
+
+        let Zip1(collision_stencil) = exec.alloc::<(u32,)>(idx.len()).unwrap();
+        massively::transform(
+            exec,
+            Zip1(tmp.slice(..)),
+            IsCollidable,
+            (),
+            Zip1(collision_stencil.slice_mut(..)),
+        )
+        .unwrap();
+        Zip1(collision_stencil)
     };
 
     // -----------------------------------------------------------------
@@ -124,7 +171,7 @@ pub fn relax<R: Runtime>(
         u.slice_mut(..),
         v.slice_mut(..),
         w.slice_mut(..),
-        idx,
+        idx.slice(..),
         k,
         seed,
     );
@@ -134,47 +181,69 @@ pub fn relax<R: Runtime>(
     // -----------------------------------------------------------------
 
     // 3.1 Compute current kinetic energy for each cell after shell assignment.
-    let SoA1(kinetic_e) = massively::map(
+    let Zip1(kinetic_e) = exec.alloc::<(f32,)>(idx.len()).unwrap();
+    massively::transform(
         exec,
-        SoA4(u.slice(..), v.slice(..), w.slice(..), m.slice(..)),
+        Zip4(u.slice(..), v.slice(..), w.slice(..), m.slice(..)),
         calc_kin_e::CalcKinE,
         (),
+        Zip1(kinetic_e.slice_mut(..)),
     )
     .unwrap();
 
-    let (SoA1(cell_sum_kin_e), _) = algorithm::reduce_by_bucket(
+    let Zip1(cell_sum_kin_e) = Zip1(exec.constant(k, 0_f32).unwrap());
+    let cell_cnt_tmp = exec.constant(k, 0_u32).unwrap();
+    algorithm::reduce_by_bucket(
         exec,
-        idx,
-        SoA1(kinetic_e.slice(..)),
+        idx.slice(..),
+        Zip1(kinetic_e.slice(..)),
         (0.,),
         common::Add_F32_1,
-        k,
-    );
+        Zip1(cell_sum_kin_e.slice_mut(..)),
+        cell_cnt_tmp.slice_mut(..),
+    )
+    .unwrap();
 
     // 3.2 Compute kinetic energy redistributed from total energy for each cell.
     // Target kinetic energy = total energy * 3 / (3+s).
-    let SoA1(cell_sum_tobe_kin_e) =
-        massively::map(exec, SoA1(cell_sum_total_e.slice(..)), DistributeKinE, s).unwrap();
+    let Zip1(cell_sum_tobe_kin_e) = exec.alloc::<(f32,)>(k).unwrap();
+    massively::transform(
+        exec,
+        Zip1(cell_sum_total_e.slice(..)),
+        DistributeKinE,
+        s,
+        Zip1(cell_sum_tobe_kin_e.slice_mut(..)),
+    )
+    .unwrap();
 
     // 3.3 Compute the velocity ratio from the kinetic energy ratio.
     // Ratio = sqrt(target kinetic energy / actual kinetic energy).
-    let SoA1(cell_vel_ratio) = massively::map(
+    let Zip1(cell_vel_ratio) = exec.alloc::<(f32,)>(k).unwrap();
+    massively::transform(
         exec,
-        SoA2(cell_sum_tobe_kin_e.slice(..), cell_sum_kin_e.slice(..)),
+        Zip2(cell_sum_tobe_kin_e.slice(..), cell_sum_kin_e.slice(..)),
         CalcVelocityRatio,
         (),
+        Zip1(cell_vel_ratio.slice_mut(..)),
     )
     .unwrap();
 
     // 3.4 Scale velocities by the ratio.
-    let SoA1(vel_ratio) = massively::permute(exec, SoA1(cell_vel_ratio.slice(..)), idx).unwrap();
+    let Zip1(vel_ratio) = exec.alloc::<(f32,)>(idx.len()).unwrap();
+    massively::gather(
+        exec,
+        Zip1(cell_vel_ratio.slice(..)),
+        idx.slice(..),
+        Zip1(vel_ratio.slice_mut(..)),
+    )
+    .unwrap();
 
     massively::transform(
         exec,
-        SoA4(u.slice(..), v.slice(..), w.slice(..), vel_ratio.slice(..)),
+        Zip4(u.slice(..), v.slice(..), w.slice(..), vel_ratio.slice(..)),
         ScaleVelocity,
         (),
-        SoA3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
+        Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
 
@@ -183,23 +252,32 @@ pub fn relax<R: Runtime>(
     // -----------------------------------------------------------------
 
     // Compute new internal energy.
-    let SoA1(cell_sum_tobe_in_e) =
-        massively::map(exec, SoA1(cell_sum_total_e.slice(..)), DistributeInE, s).unwrap();
-
-    let SoA1(cell_tobe_in_e) = massively::map(
+    let Zip1(cell_sum_tobe_in_e) = exec.alloc::<(f32,)>(k).unwrap();
+    massively::transform(
         exec,
-        SoA2(cell_sum_tobe_in_e.slice(..), cell_cnt.slice(..)),
+        Zip1(cell_sum_total_e.slice(..)),
+        DistributeInE,
+        s,
+        Zip1(cell_sum_tobe_in_e.slice_mut(..)),
+    )
+    .unwrap();
+
+    let Zip1(cell_tobe_in_e) = exec.alloc::<(f32,)>(k).unwrap();
+    massively::transform(
+        exec,
+        Zip2(cell_sum_tobe_in_e.slice(..), cell_cnt.slice(..)),
         common::CellAve_F32_1,
         (),
+        Zip1(cell_tobe_in_e.slice_mut(..)),
     )
     .unwrap();
 
     massively::gather_where(
         exec,
-        SoA1(cell_tobe_in_e.slice(..)),
-        idx,
+        Zip1(cell_tobe_in_e.slice(..)),
+        idx.slice(..),
         collision_stencil.slice(..),
-        SoA1(in_e),
+        Zip1(in_e),
     )
     .unwrap();
 }
