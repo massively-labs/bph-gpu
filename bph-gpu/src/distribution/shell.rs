@@ -16,10 +16,10 @@ pub fn alloc_shell_rand<R: Runtime>(
     let uniform2 = uniform.slice(n..2 * n);
     massively::transform(
         exec,
-        SoA2(uniform1, uniform2),
+        Zip2(uniform1, uniform2),
         ShellRand,
         (),
-        SoA3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
+        Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
 }

@@ -10,19 +10,32 @@ pub fn sub_average_velocity<R: Runtime>(
     k: u32,
 ) -> (DeviceVec<R, f32>, DeviceVec<R, f32>, DeviceVec<R, f32>) {
     // Compute total velocity and particle count for each cell.
-    let (SoA3(cell_sum_u, cell_sum_v, cell_sum_w), cell_cnt) = algorithm::reduce_by_bucket(
+    let Zip3(cell_sum_u, cell_sum_v, cell_sum_w) = Zip3(
+        exec.constant(k, 0_f32).unwrap(),
+        exec.constant(k, 0_f32).unwrap(),
+        exec.constant(k, 0_f32).unwrap(),
+    );
+    let cell_cnt = exec.constant(k, 0_u32).unwrap();
+    algorithm::reduce_by_bucket(
         exec,
-        idx,
-        SoA3(u.slice(..), v.slice(..), w.slice(..)),
+        idx.slice(..),
+        Zip3(u.slice(..), v.slice(..), w.slice(..)),
         (0.0, 0.0, 0.0),
         common::Add_F32_3,
-        k,
-    );
+        Zip3(
+            cell_sum_u.slice_mut(..),
+            cell_sum_v.slice_mut(..),
+            cell_sum_w.slice_mut(..),
+        ),
+        cell_cnt.slice_mut(..),
+    )
+    .unwrap();
 
     // Compute average velocity.
-    let SoA3(cell_ave_u, cell_ave_v, cell_ave_w) = massively::map(
+    let Zip3(cell_ave_u, cell_ave_v, cell_ave_w) = exec.alloc::<(f32, f32, f32)>(k).unwrap();
+    massively::transform(
         exec,
-        SoA4(
+        Zip4(
             cell_sum_u.slice(..),
             cell_sum_v.slice(..),
             cell_sum_w.slice(..),
@@ -30,24 +43,35 @@ pub fn sub_average_velocity<R: Runtime>(
         ),
         common::CellAve_F32_3,
         (),
+        Zip3(
+            cell_ave_u.slice_mut(..),
+            cell_ave_v.slice_mut(..),
+            cell_ave_w.slice_mut(..),
+        ),
     )
     .unwrap();
 
     // Subtract average velocity.
-    let SoA3(ave_u, ave_v, ave_w) = massively::permute(
+    let Zip3(ave_u, ave_v, ave_w) = exec.alloc::<(f32, f32, f32)>(idx.len()).unwrap();
+    massively::gather(
         exec,
-        SoA3(
+        Zip3(
             cell_ave_u.slice(..),
             cell_ave_v.slice(..),
             cell_ave_w.slice(..),
         ),
-        idx,
+        idx.slice(..),
+        Zip3(
+            ave_u.slice_mut(..),
+            ave_v.slice_mut(..),
+            ave_w.slice_mut(..),
+        ),
     )
     .unwrap();
 
     massively::transform(
         exec,
-        SoA6(
+        Zip6(
             u.slice(..),
             v.slice(..),
             w.slice(..),
@@ -57,7 +81,7 @@ pub fn sub_average_velocity<R: Runtime>(
         ),
         common::Sub_F32_3,
         (),
-        SoA3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
+        Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
 
@@ -88,10 +112,10 @@ pub fn add_average_velocity<R: Runtime>(
 ) {
     massively::transform(
         exec,
-        SoA6(u.slice(..), v.slice(..), w.slice(..), ave_u, ave_v, ave_w),
+        Zip6(u.slice(..), v.slice(..), w.slice(..), ave_u, ave_v, ave_w),
         AddAve,
         (),
-        SoA3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
+        Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
 }

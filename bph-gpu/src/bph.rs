@@ -18,7 +18,7 @@ pub fn bph<R: Runtime>(
         u.slice_mut(..),
         v.slice_mut(..),
         w.slice_mut(..),
-        idx,
+        idx.slice(..),
         k,
     );
 
@@ -30,7 +30,7 @@ pub fn bph<R: Runtime>(
         w.slice_mut(..),
         m,
         in_e,
-        idx,
+        idx.slice(..),
         k,
         s,
         seed,

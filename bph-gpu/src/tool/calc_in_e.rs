@@ -12,32 +12,61 @@ pub fn calc_in_e<R: Runtime>(
     s: f32,
 ) -> DeviceVec<R, f32> {
     // Compute kinetic energy for each particle.
-    let SoA1(kietic_e) = massively::map(exec, SoA4(u, v, w, m), calc_kin_e::CalcKinE, ()).unwrap();
+    let Zip1(kietic_e) = exec.alloc::<(f32,)>(u.len()).unwrap();
+    massively::transform(
+        exec,
+        Zip4(u, v, w, m),
+        calc_kin_e::CalcKinE,
+        (),
+        Zip1(kietic_e.slice_mut(..)),
+    )
+    .unwrap();
 
     // Compute the kinetic energy sum for each cell.
-    let (SoA1(sum_kinetic_e), cnt) = algorithm::reduce_by_bucket(
+    let Zip1(sum_kinetic_e) = Zip1(exec.constant(k, 0_f32).unwrap());
+    let cnt = exec.constant(k, 0_u32).unwrap();
+    algorithm::reduce_by_bucket(
         exec,
-        idx,
-        SoA1(kietic_e.slice(..)),
+        idx.slice(..),
+        Zip1(kietic_e.slice(..)),
         (0.,),
         common::Add_F32_1,
-        k,
-    );
+        Zip1(sum_kinetic_e.slice_mut(..)),
+        cnt.slice_mut(..),
+    )
+    .unwrap();
 
     // Multiply by s/3 to compute the internal energy sum for each cell.
-    let SoA1(sum_in_e) = massively::map(exec, SoA1(sum_kinetic_e.slice(..)), CalcInE, s).unwrap();
+    let Zip1(sum_in_e) = exec.alloc::<(f32,)>(k).unwrap();
+    massively::transform(
+        exec,
+        Zip1(sum_kinetic_e.slice(..)),
+        CalcInE,
+        s,
+        Zip1(sum_in_e.slice_mut(..)),
+    )
+    .unwrap();
 
     // Divide by the particle count to get the per-particle internal energy for each cell.
-    let SoA1(in_e) = massively::map(
+    let Zip1(in_e) = exec.alloc::<(f32,)>(k).unwrap();
+    massively::transform(
         exec,
-        SoA2(sum_in_e.slice(..), cnt.slice(..)),
+        Zip2(sum_in_e.slice(..), cnt.slice(..)),
         common::CellAve_F32_1,
         (),
+        Zip1(in_e.slice_mut(..)),
     )
     .unwrap();
 
     // Permute by particle index and return internal energy for each particle.
-    let SoA1(out) = massively::permute(exec, SoA1(in_e.slice(..)), idx).unwrap();
+    let Zip1(out) = exec.alloc::<(f32,)>(idx.len()).unwrap();
+    massively::gather(
+        exec,
+        Zip1(in_e.slice(..)),
+        idx.slice(..),
+        Zip1(out.slice_mut(..)),
+    )
+    .unwrap();
 
     out
 }

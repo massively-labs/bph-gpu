@@ -118,22 +118,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     massively::transform(
         &exec,
-        SoA3(x.slice(..), y.slice(..), z.slice(..)),
+        Zip3(x.slice(..), y.slice(..), z.slice(..)),
         VelocityTowardCenter,
         center,
-        SoA3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
+        Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )?;
 
     for step in 0..end_step {
         let mass = exec.constant(x.len() as u32, 1. as f32)?;
-        let SoA1(idx) = calc_idx(&exec, &x, &y, &z, cell_size, width)?;
-        let (
-            SoA1(sorted_idx),
-            SoA7(sorted_x, sorted_y, sorted_z, sorted_u, sorted_v, sorted_w, sorted_in_e),
-        ) = massively::sort_by_key(
+        let Zip1(idx) = calc_idx(&exec, &x, &y, &z, cell_size, width)?;
+        let Zip1(sorted_idx) = exec.alloc::<(u32,)>(idx.len())?;
+        let Zip7(sorted_x, sorted_y, sorted_z, sorted_u, sorted_v, sorted_w, sorted_in_e) =
+            exec.alloc::<(f32, f32, f32, f32, f32, f32, f32)>(idx.len())?;
+        massively::sort_by_key(
             &exec,
-            SoA1(idx.slice(..)),
-            SoA7(
+            Zip1(idx.slice(..)),
+            Zip7(
                 x.slice(..),
                 y.slice(..),
                 z.slice(..),
@@ -143,6 +143,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 in_e.slice(..),
             ),
             massively::op::Less,
+            Zip1(sorted_idx.slice_mut(..)),
+            Zip7(
+                sorted_x.slice_mut(..),
+                sorted_y.slice_mut(..),
+                sorted_z.slice_mut(..),
+                sorted_u.slice_mut(..),
+                sorted_v.slice_mut(..),
+                sorted_w.slice_mut(..),
+                sorted_in_e.slice_mut(..),
+            ),
         )?;
 
         x = sorted_x;
@@ -168,7 +178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         massively::transform(
             &exec,
-            SoA7(
+            Zip7(
                 x.slice(..),
                 y.slice(..),
                 z.slice(..),
@@ -179,7 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
             RungeKutta1::<NoForce>::new(),
             (dt, ()),
-            SoA6(
+            Zip6(
                 x.slice_mut(..),
                 y.slice_mut(..),
                 z.slice_mut(..),
@@ -191,9 +201,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(out) = args.out {
-        let SoA1(idx) = calc_idx(&exec, &x, &y, &z, cell_size, width)?;
-        let SoA1(sorted_idx) = massively::sort(&exec, SoA1(idx.slice(..)), massively::op::Less)?;
-        let counts = bph_gpu::algorithm::bucket_counting(&exec, sorted_idx.slice(..), n_cell);
+        let Zip1(idx) = calc_idx(&exec, &x, &y, &z, cell_size, width)?;
+        let Zip1(sorted_idx) = exec.alloc::<(u32,)>(idx.len())?;
+        massively::sort(
+            &exec,
+            Zip1(idx.slice(..)),
+            massively::op::Less,
+            Zip1(sorted_idx.slice_mut(..)),
+        )?;
+        let counts = exec.constant(n_cell, 0_u32)?;
+        bph_gpu::algorithm::bucket_counting(&exec, sorted_idx.slice(..), counts.slice_mut(..))?;
         let counts = exec.to_host(&counts)?;
         write_density_matrix(out, &counts, width, n)?;
     }
@@ -246,13 +263,16 @@ fn calc_idx<R: Runtime>(
     z: &DeviceVec<R, f32>,
     cell_size: f32,
     width: u32,
-) -> bph_gpu::Error<SoA1<DeviceVec<R, u32>>> {
-    massively::map(
+) -> bph_gpu::Error<Zip1<DeviceVec<R, u32>>> {
+    let Zip1(idx) = exec.alloc::<(u32,)>(x.len())?;
+    massively::transform(
         exec,
-        SoA3(x.slice(..), y.slice(..), z.slice(..)),
+        Zip3(x.slice(..), y.slice(..), z.slice(..)),
         CalcCellIndexNoh2d,
         NohSpaceLaunch::new((0., 0., 0.), (cell_size, cell_size, 1.), (width, width, 1)),
-    )
+        Zip1(idx.slice_mut(..)),
+    )?;
+    Ok(Zip1(idx))
 }
 
 fn remove_out_of_circle<R: Runtime>(
@@ -267,15 +287,18 @@ fn remove_out_of_circle<R: Runtime>(
     center: (f32, f32, f32),
     rad: f32,
 ) -> bph_gpu::Error<()> {
-    let SoA1(out_of_circle) = massively::map(
+    let Zip1(out_of_circle) = exec.alloc::<(u32,)>(x.len())?;
+    massively::transform(
         exec,
-        SoA3(x.slice(..), y.slice(..), z.slice(..)),
+        Zip3(x.slice(..), y.slice(..), z.slice(..)),
         OutOfCircle,
         (center.0, center.1, center.2, rad),
+        Zip1(out_of_circle.slice_mut(..)),
     )?;
-    let SoA7(new_x, new_y, new_z, new_u, new_v, new_w, new_in_e) = massively::remove_where(
+    let tmp = exec.alloc::<(f32, f32, f32, f32, f32, f32, f32)>(x.len())?;
+    let n = massively::remove_where(
         exec,
-        SoA7(
+        Zip7(
             x.slice(..),
             y.slice(..),
             z.slice(..),
@@ -285,6 +308,24 @@ fn remove_out_of_circle<R: Runtime>(
             in_e.slice(..),
         ),
         out_of_circle.slice(..),
+        tmp.slice_mut(..),
+    )?;
+    let Zip7(new_x, new_y, new_z, new_u, new_v, new_w, new_in_e) =
+        exec.alloc::<(f32, f32, f32, f32, f32, f32, f32)>(n)?;
+    let indices = exec.counting(n)?;
+    massively::gather(
+        exec,
+        tmp.slice(..n),
+        indices.slice(..),
+        Zip7(
+            new_x.slice_mut(..),
+            new_y.slice_mut(..),
+            new_z.slice_mut(..),
+            new_u.slice_mut(..),
+            new_v.slice_mut(..),
+            new_w.slice_mut(..),
+            new_in_e.slice_mut(..),
+        ),
     )?;
 
     *x = new_x;
