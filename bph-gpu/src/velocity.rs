@@ -11,11 +11,11 @@ pub fn sub_average_velocity<R: Runtime>(
 ) -> (DeviceVec<R, f32>, DeviceVec<R, f32>, DeviceVec<R, f32>) {
     // Compute total velocity and particle count for each cell.
     let Zip3(cell_sum_u, cell_sum_v, cell_sum_w) = Zip3(
-        exec.constant(k, 0_f32).unwrap(),
-        exec.constant(k, 0_f32).unwrap(),
-        exec.constant(k, 0_f32).unwrap(),
+        exec.full(k, 0_f32).unwrap(),
+        exec.full(k, 0_f32).unwrap(),
+        exec.full(k, 0_f32).unwrap(),
     );
-    let cell_cnt = exec.constant(k, 0_u32).unwrap();
+    let cell_cnt = exec.full(k, 0_u32).unwrap();
     algorithm::reduce_by_bucket(
         exec,
         idx.slice(..),
@@ -35,14 +35,15 @@ pub fn sub_average_velocity<R: Runtime>(
     let Zip3(cell_ave_u, cell_ave_v, cell_ave_w) = exec.alloc::<(f32, f32, f32)>(k).unwrap();
     massively::transform(
         exec,
-        Zip4(
-            cell_sum_u.slice(..),
-            cell_sum_v.slice(..),
-            cell_sum_w.slice(..),
+        Zip2(
+            Zip3(
+                cell_sum_u.slice(..),
+                cell_sum_v.slice(..),
+                cell_sum_w.slice(..),
+            ),
             cell_cnt.slice(..),
         ),
         common::CellAve_F32_3,
-        (),
         Zip3(
             cell_ave_u.slice_mut(..),
             cell_ave_v.slice_mut(..),
@@ -71,16 +72,11 @@ pub fn sub_average_velocity<R: Runtime>(
 
     massively::transform(
         exec,
-        Zip6(
-            u.slice(..),
-            v.slice(..),
-            w.slice(..),
-            ave_u.slice(..),
-            ave_v.slice(..),
-            ave_w.slice(..),
+        Zip2(
+            Zip3(u.slice(..), v.slice(..), w.slice(..)),
+            Zip3(ave_u.slice(..), ave_v.slice(..), ave_w.slice(..)),
         ),
         common::Sub_F32_3,
-        (),
         Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
@@ -90,12 +86,12 @@ pub fn sub_average_velocity<R: Runtime>(
 
 struct AddAve;
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32, f32, f32, f32, f32, f32)> for AddAve {
-    type Env = ();
-    type Output = (f32, f32, f32);
+impl<R: Runtime> UnaryOp<R, (f32_3, f32_3)> for AddAve {
+    type Output = f32_3;
 
-    fn apply(_env: (), x: (f32, f32, f32, f32, f32, f32)) -> (f32, f32, f32) {
-        let (u, v, w, au, av, aw) = x;
+    fn apply(x: (f32_3, f32_3)) -> f32_3 {
+        let (u, v, w) = x.0;
+        let (au, av, aw) = x.1;
         (u + au, v + av, w + aw)
     }
 }
@@ -112,9 +108,11 @@ pub fn add_average_velocity<R: Runtime>(
 ) {
     massively::transform(
         exec,
-        Zip6(u.slice(..), v.slice(..), w.slice(..), ave_u, ave_v, ave_w),
+        Zip2(
+            Zip3(u.slice(..), v.slice(..), w.slice(..)),
+            Zip3(ave_u, ave_v, ave_w),
+        ),
         AddAve,
-        (),
         Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();

@@ -11,36 +11,30 @@ pub struct Range {
 
 pub struct OutHi;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_1> for OutHi {
-    type Env = Wall;
-    type Output = (u32,);
-    fn apply(env: Wall, inp: f32_1) -> (u32,) {
-        let v = inp.0;
-        let wall = env;
-        if v > wall { (1u32,) } else { (0u32,) }
+impl<R: Runtime> UnaryOp<R, f32_2> for OutHi {
+    type Output = bool;
+    fn apply(inp: f32_2) -> bool {
+        let (v, wall) = inp;
+        v > wall
     }
 }
 
 pub struct OutLo;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_1> for OutLo {
-    type Env = Wall;
-    type Output = (u32,);
-    fn apply(env: Wall, inp: f32_1) -> (u32,) {
-        let v = inp.0;
-        let wall = env;
-        if v < wall { (1u32,) } else { (0u32,) }
+impl<R: Runtime> UnaryOp<R, f32_2> for OutLo {
+    type Output = bool;
+    fn apply(inp: f32_2) -> bool {
+        let (v, wall) = inp;
+        v < wall
     }
 }
 
 pub struct ReflectHi;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_1> for ReflectHi {
-    type Env = f32;
+impl<R: Runtime> UnaryOp<R, f32_2> for ReflectHi {
     type Output = f32_1;
-    fn apply(env: Wall, inp: f32_1) -> f32_1 {
-        let x = inp.0;
-        let wall = env;
+    fn apply(inp: f32_2) -> f32_1 {
+        let (x, wall) = inp;
         // x - (x-wall)*2
         let v = wall * 2. - x;
         (v,)
@@ -49,12 +43,10 @@ impl<R: Runtime> UnaryOp<R, f32_1> for ReflectHi {
 
 pub struct ReflectLo;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_1> for ReflectLo {
-    type Env = f32;
+impl<R: Runtime> UnaryOp<R, f32_2> for ReflectLo {
     type Output = f32_1;
-    fn apply(env: Wall, inp: f32_1) -> f32_1 {
-        let x = inp.0;
-        let wall = env;
+    fn apply(inp: f32_2) -> f32_1 {
+        let (x, wall) = inp;
         // x + (wall-x)*2
         let v = wall * 2. - x;
         (v,)
@@ -64,22 +56,18 @@ impl<R: Runtime> UnaryOp<R, f32_1> for ReflectLo {
 pub struct Negate;
 #[cube]
 impl<R: Runtime> UnaryOp<R, f32_1> for Negate {
-    type Env = ();
     type Output = f32_1;
-    fn apply(_env: (), inp: f32_1) -> f32_1 {
+    fn apply(inp: f32_1) -> f32_1 {
         (-inp.0,)
     }
 }
 
 pub struct WrapHi;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_1> for WrapHi {
-    type Env = Range;
+impl<R: Runtime> UnaryOp<R, f32_3> for WrapHi {
     type Output = f32_1;
-    fn apply(env: Range, inp: f32_1) -> f32_1 {
-        let x = inp.0;
-        let lo = env.lo;
-        let hi = env.hi;
+    fn apply(inp: f32_3) -> f32_1 {
+        let (x, lo, hi) = inp;
         let v = x - (hi - lo);
         (v,)
     }
@@ -87,13 +75,10 @@ impl<R: Runtime> UnaryOp<R, f32_1> for WrapHi {
 
 pub struct WrapLo;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_1> for WrapLo {
-    type Env = Range;
+impl<R: Runtime> UnaryOp<R, f32_3> for WrapLo {
     type Output = f32_1;
-    fn apply(env: Range, inp: f32_1) -> f32_1 {
-        let x = inp.0;
-        let lo = env.lo;
-        let hi = env.hi;
+    fn apply(inp: f32_3) -> f32_1 {
+        let (x, lo, hi) = inp;
         let v = x + (hi - lo);
         (v,)
     }

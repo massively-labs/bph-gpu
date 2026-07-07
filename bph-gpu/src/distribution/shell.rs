@@ -18,7 +18,6 @@ pub fn alloc_shell_rand<R: Runtime>(
         exec,
         Zip2(uniform1, uniform2),
         ShellRand,
-        (),
         Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
@@ -27,9 +26,8 @@ pub fn alloc_shell_rand<R: Runtime>(
 struct ShellRand;
 #[cube]
 impl<R: Runtime> UnaryOp<R, (f32, f32)> for ShellRand {
-    type Env = ();
     type Output = (f32, f32, f32);
-    fn apply(_env: (), x: (f32, f32)) -> (f32, f32, f32) {
+    fn apply(x: (f32, f32)) -> (f32, f32, f32) {
         let (rand1, rand2) = x;
         let cs = 1. - 2. * rand1; // cs = [-1, 1)
         let sn = (1. - cs * cs).sqrt();

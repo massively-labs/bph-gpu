@@ -1,8 +1,6 @@
-use bph_gpu::tool::boundary::{
-    Negate, OutHi, OutLo, Range, RangeLaunch, ReflectLo, WrapHi, WrapLo,
-};
+use bph_gpu::tool::boundary::{Negate, OutHi, OutLo, Range, ReflectLo, WrapHi, WrapLo};
 use bph_gpu::tool::force::NoForce;
-use bph_gpu::tool::space::{CalcCellIndex1d, Space, SpaceLaunch};
+use bph_gpu::tool::space::{CalcCellIndex1d, Space};
 use bph_gpu::tool::streaming::RungeKutta1;
 use clap::Parser;
 use cubecl::Runtime;
@@ -32,14 +30,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let space = Space::new((0., 0., 0.), (dt, 1., 1.), (n_cell, 1, 1));
     let exec = Executor::<cubecl::wgpu::WgpuRuntime>::new(cubecl::wgpu::WgpuDevice::DefaultDevice);
 
-    let mass = exec.constant(n_particle, 1. as f32)?;
-    let mut x = exec.constant(n_particle, 0. as f32)?;
-    let mut y = exec.constant(n_particle, 0. as f32)?;
-    let mut z = exec.constant(n_particle, 0. as f32)?;
-    let mut u = exec.constant(n_particle, -1. as f32)?;
-    let mut v = exec.constant(n_particle, 0. as f32)?;
-    let mut w = exec.constant(n_particle, 0. as f32)?;
-    let mut in_e = exec.constant(n_particle, 0. as f32)?;
+    let mass = exec.full(n_particle, 1. as f32)?;
+    let mut x = exec.full(n_particle, 0. as f32)?;
+    let mut y = exec.full(n_particle, 0. as f32)?;
+    let mut z = exec.full(n_particle, 0. as f32)?;
+    let mut u = exec.full(n_particle, -1. as f32)?;
+    let mut v = exec.full(n_particle, 0. as f32)?;
+    let mut w = exec.full(n_particle, 0. as f32)?;
+    let mut in_e = exec.full(n_particle, 0. as f32)?;
 
     for i in 0..n_cell {
         let cell = space.get_cell_at(i, 0, 0);
@@ -108,10 +106,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 u.slice(..),
                 v.slice(..),
                 w.slice(..),
-                mass.slice(..),
+                massively::lazy::constant(dt).take(x.len()),
             ),
             RungeKutta1::<NoForce>::new(),
-            (dt, ()),
             Zip6(
                 x.slice_mut(..),
                 y.slice_mut(..),
@@ -136,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             massively::op::Less,
             Zip1(sorted_idx.slice_mut(..)),
         )?;
-        let counts = exec.constant(n_cell, 0_u32)?;
+        let counts = exec.full(n_cell, 0_u32)?;
         bph_gpu::algorithm::bucket_counting(&exec, sorted_idx.slice(..), counts.slice_mut(..))?;
         let counts = exec.to_host(&counts)?;
         write_density_1d(out, &counts, n)?;
@@ -194,9 +191,13 @@ fn calc_idx<R: Runtime>(
     let Zip1(idx) = exec.alloc::<(u32,)>(x.len())?;
     massively::transform(
         exec,
-        Zip3(x.slice(..), y.slice(..), z.slice(..)),
+        Zip4(
+            x.slice(..),
+            massively::lazy::constant(0.0_f32).take(x.len()),
+            massively::lazy::constant(dt).take(x.len()),
+            massively::lazy::constant(n_cell).take(x.len()),
+        ),
         CalcCellIndex1d,
-        SpaceLaunch::new((0., 0., 0.), (dt, 1., 1.), (n_cell, 1, 1)),
         Zip1(idx.slice_mut(..)),
     )?;
     Ok(Zip1(idx))
@@ -208,37 +209,41 @@ fn apply_periodic<R: Runtime>(
     lo: f32,
     hi: f32,
 ) -> bph_gpu::Error<()> {
-    let Zip1(out_lo) = exec.alloc::<(u32,)>(values.len())?;
-    massively::transform(
-        exec,
-        Zip1(values.slice(..)),
+    let out_lo = massively::lazy::transform(
+        Zip2(
+            values.slice(..),
+            massively::lazy::constant(lo).take(values.len()),
+        ),
         OutLo,
-        lo,
-        Zip1(out_lo.slice_mut(..)),
-    )?;
+    );
     massively::transform_where(
         exec,
-        Zip1(values.slice(..)),
+        Zip3(
+            values.slice(..),
+            massively::lazy::constant(lo).take(values.len()),
+            massively::lazy::constant(hi).take(values.len()),
+        ),
         WrapLo,
-        RangeLaunch::new(lo, hi),
-        out_lo.slice(..),
+        out_lo,
         Zip1(values.slice_mut(..)),
     )?;
 
-    let Zip1(out_hi) = exec.alloc::<(u32,)>(values.len())?;
-    massively::transform(
-        exec,
-        Zip1(values.slice(..)),
+    let out_hi = massively::lazy::transform(
+        Zip2(
+            values.slice(..),
+            massively::lazy::constant(hi).take(values.len()),
+        ),
         OutHi,
-        hi,
-        Zip1(out_hi.slice_mut(..)),
-    )?;
+    );
     massively::transform_where(
         exec,
-        Zip1(values.slice(..)),
+        Zip3(
+            values.slice(..),
+            massively::lazy::constant(lo).take(values.len()),
+            massively::lazy::constant(hi).take(values.len()),
+        ),
         WrapHi,
-        RangeLaunch::new(lo, hi),
-        out_hi.slice(..),
+        out_hi,
         Zip1(values.slice_mut(..)),
     )?;
 
@@ -250,28 +255,35 @@ fn apply_reflect_lo_x<R: Runtime>(
     x: &mut DeviceVec<R, f32>,
     u: &mut DeviceVec<R, f32>,
 ) -> bph_gpu::Error<()> {
-    let Zip1(out_lo) = exec.alloc::<(u32,)>(x.len())?;
-    massively::transform(
-        exec,
-        Zip1(x.slice(..)),
+    let out_lo = massively::lazy::transform(
+        Zip2(
+            x.slice(..),
+            massively::lazy::constant(0.0_f32).take(x.len()),
+        ),
         OutLo,
-        0.,
-        Zip1(out_lo.slice_mut(..)),
-    )?;
+    );
     massively::transform_where(
         exec,
         Zip1(u.slice(..)),
         Negate,
-        (),
-        out_lo.slice(..),
+        out_lo,
         Zip1(u.slice_mut(..)),
     )?;
+    let out_lo = massively::lazy::transform(
+        Zip2(
+            x.slice(..),
+            massively::lazy::constant(0.0_f32).take(x.len()),
+        ),
+        OutLo,
+    );
     massively::transform_where(
         exec,
-        Zip1(x.slice(..)),
+        Zip2(
+            x.slice(..),
+            massively::lazy::constant(0.0_f32).take(x.len()),
+        ),
         ReflectLo,
-        0.,
-        out_lo.slice(..),
+        out_lo,
         Zip1(x.slice_mut(..)),
     )?;
 

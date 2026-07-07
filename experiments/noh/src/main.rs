@@ -20,56 +20,47 @@ struct Args {
     out: Option<PathBuf>,
 }
 
-#[derive(CubeType, CubeLaunch, Clone, Copy)]
-#[expand(derive(Clone))]
-struct NohSpace {
-    origin: (f32, f32, f32),
-    space: (f32, f32, f32),
-    dim: (u32, u32, u32),
-}
-
 struct CalcCellIndexNoh2d;
 
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32, f32, f32)> for CalcCellIndexNoh2d {
-    type Env = NohSpace;
+impl<R: Runtime> UnaryOp<R, (f32, f32, f32, f32, u32)> for CalcCellIndexNoh2d {
     type Output = (u32,);
 
-    fn apply(env: NohSpace, p: (f32, f32, f32)) -> (u32,) {
-        let i = ((p.0 - env.origin.0) / env.space.0) as u32;
-        let j = ((p.1 - env.origin.1) / env.space.1) as u32;
-        let k = ((p.2 - env.origin.2) / env.space.2) as u32;
-        (i * env.dim.1 * env.dim.2 + j * env.dim.2 + k,)
+    fn apply(input: (f32, f32, f32, f32, u32)) -> (u32,) {
+        let (x, y, _z, cell_size, width) = input;
+        let i = (x / cell_size) as u32;
+        let j = (y / cell_size) as u32;
+        (i * width + j,)
     }
 }
 
 struct OutOfCircle;
 
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32, f32, f32)> for OutOfCircle {
-    type Env = (f32, f32, f32, f32);
-    type Output = (u32,);
+impl<R: Runtime> UnaryOp<R, (f32, f32, f32, f32, f32, f32, f32)> for OutOfCircle {
+    type Output = bool;
 
-    fn apply(env: (f32, f32, f32, f32), p: (f32, f32, f32)) -> (u32,) {
-        let dx = p.0 - env.0;
-        let dy = p.1 - env.1;
-        let dz = p.2 - env.2;
+    fn apply(input: (f32, f32, f32, f32, f32, f32, f32)) -> bool {
+        let (x, y, z, cx, cy, cz, rad) = input;
+        let dx = x - cx;
+        let dy = y - cy;
+        let dz = z - cz;
         let distance = (dx * dx + dy * dy + dz * dz).sqrt();
-        if distance > env.3 { (1u32,) } else { (0u32,) }
+        distance > rad
     }
 }
 
 struct VelocityTowardCenter;
 
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32, f32, f32)> for VelocityTowardCenter {
-    type Env = (f32, f32, f32);
+impl<R: Runtime> UnaryOp<R, (f32, f32, f32, f32, f32, f32)> for VelocityTowardCenter {
     type Output = (f32, f32, f32);
 
-    fn apply(center: (f32, f32, f32), p: (f32, f32, f32)) -> (f32, f32, f32) {
-        let dx = center.0 - p.0;
-        let dy = center.1 - p.1;
-        let dz = center.2 - p.2;
+    fn apply(input: (f32, f32, f32, f32, f32, f32)) -> (f32, f32, f32) {
+        let (x, y, z, cx, cy, cz) = input;
+        let dx = cx - x;
+        let dy = cy - y;
+        let dz = cz - z;
         let len = (dx * dx + dy * dy + dz * dz).sqrt();
         if len == 0.0_f32 {
             (0.0_f32, 0.0_f32, 0.0_f32)
@@ -95,13 +86,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let space = Space::new((0., 0., 0.), (cell_size, cell_size, 1.), (width, width, 1));
     let exec = Executor::<cubecl::wgpu::WgpuRuntime>::new(cubecl::wgpu::WgpuDevice::DefaultDevice);
 
-    let mut x = exec.constant(n_particle, 0. as f32)?;
-    let mut y = exec.constant(n_particle, 0. as f32)?;
-    let mut z = exec.constant(n_particle, 0. as f32)?;
-    let mut u = exec.constant(n_particle, 0. as f32)?;
-    let mut v = exec.constant(n_particle, 0. as f32)?;
-    let mut w = exec.constant(n_particle, 0. as f32)?;
-    let mut in_e = exec.constant(n_particle, 0. as f32)?;
+    let mut x = exec.full(n_particle, 0. as f32)?;
+    let mut y = exec.full(n_particle, 0. as f32)?;
+    let mut z = exec.full(n_particle, 0. as f32)?;
+    let mut u = exec.full(n_particle, 0. as f32)?;
+    let mut v = exec.full(n_particle, 0. as f32)?;
+    let mut w = exec.full(n_particle, 0. as f32)?;
+    let mut in_e = exec.full(n_particle, 0. as f32)?;
 
     for i in 0..width {
         for j in 0..width {
@@ -118,14 +109,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     massively::transform(
         &exec,
-        Zip3(x.slice(..), y.slice(..), z.slice(..)),
+        Zip6(
+            x.slice(..),
+            y.slice(..),
+            z.slice(..),
+            massively::lazy::constant(center.0).take(x.len()),
+            massively::lazy::constant(center.1).take(x.len()),
+            massively::lazy::constant(center.2).take(x.len()),
+        ),
         VelocityTowardCenter,
-        center,
         Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )?;
 
     for step in 0..end_step {
-        let mass = exec.constant(x.len() as u32, 1. as f32)?;
+        let mass = exec.full(x.len() as u32, 1. as f32)?;
         let Zip1(idx) = calc_idx(&exec, &x, &y, &z, cell_size, width)?;
         let Zip1(sorted_idx) = exec.alloc::<(u32,)>(idx.len())?;
         let Zip7(sorted_x, sorted_y, sorted_z, sorted_u, sorted_v, sorted_w, sorted_in_e) =
@@ -185,10 +182,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 u.slice(..),
                 v.slice(..),
                 w.slice(..),
-                mass.slice(..),
+                massively::lazy::constant(dt).take(x.len()),
             ),
             RungeKutta1::<NoForce>::new(),
-            (dt, ()),
             Zip6(
                 x.slice_mut(..),
                 y.slice_mut(..),
@@ -209,7 +205,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             massively::op::Less,
             Zip1(sorted_idx.slice_mut(..)),
         )?;
-        let counts = exec.constant(n_cell, 0_u32)?;
+        let counts = exec.full(n_cell, 0_u32)?;
         bph_gpu::algorithm::bucket_counting(&exec, sorted_idx.slice(..), counts.slice_mut(..))?;
         let counts = exec.to_host(&counts)?;
         write_density_matrix(out, &counts, width, n)?;
@@ -267,9 +263,14 @@ fn calc_idx<R: Runtime>(
     let Zip1(idx) = exec.alloc::<(u32,)>(x.len())?;
     massively::transform(
         exec,
-        Zip3(x.slice(..), y.slice(..), z.slice(..)),
+        Zip5(
+            x.slice(..),
+            y.slice(..),
+            z.slice(..),
+            massively::lazy::constant(cell_size).take(x.len()),
+            massively::lazy::constant(width).take(x.len()),
+        ),
         CalcCellIndexNoh2d,
-        NohSpaceLaunch::new((0., 0., 0.), (cell_size, cell_size, 1.), (width, width, 1)),
         Zip1(idx.slice_mut(..)),
     )?;
     Ok(Zip1(idx))
@@ -287,14 +288,18 @@ fn remove_out_of_circle<R: Runtime>(
     center: (f32, f32, f32),
     rad: f32,
 ) -> bph_gpu::Error<()> {
-    let Zip1(out_of_circle) = exec.alloc::<(u32,)>(x.len())?;
-    massively::transform(
-        exec,
-        Zip3(x.slice(..), y.slice(..), z.slice(..)),
+    let out_of_circle = massively::lazy::transform(
+        Zip7(
+            x.slice(..),
+            y.slice(..),
+            z.slice(..),
+            massively::lazy::constant(center.0).take(x.len()),
+            massively::lazy::constant(center.1).take(x.len()),
+            massively::lazy::constant(center.2).take(x.len()),
+            massively::lazy::constant(rad).take(x.len()),
+        ),
         OutOfCircle,
-        (center.0, center.1, center.2, rad),
-        Zip1(out_of_circle.slice_mut(..)),
-    )?;
+    );
     let tmp = exec.alloc::<(f32, f32, f32, f32, f32, f32, f32)>(x.len())?;
     let n = massively::remove_where(
         exec,
@@ -307,16 +312,15 @@ fn remove_out_of_circle<R: Runtime>(
             w.slice(..),
             in_e.slice(..),
         ),
-        out_of_circle.slice(..),
+        out_of_circle,
         tmp.slice_mut(..),
     )?;
     let Zip7(new_x, new_y, new_z, new_u, new_v, new_w, new_in_e) =
         exec.alloc::<(f32, f32, f32, f32, f32, f32, f32)>(n)?;
-    let indices = exec.counting(n)?;
-    massively::gather(
+    massively::copy_where(
         exec,
         tmp.slice(..n),
-        indices.slice(..),
+        massively::lazy::constant(true).take(n),
         Zip7(
             new_x.slice_mut(..),
             new_y.slice_mut(..),

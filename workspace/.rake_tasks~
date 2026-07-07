@@ -1,11 +1,13 @@
 all
 bench
 dat
+draw:noh
 draw:shocktube
 draw:sjogreen
 draw:wallshock
 noh
 plot
+run:noh
 run:shocktube
 run:sjogreen
 run:wallshock

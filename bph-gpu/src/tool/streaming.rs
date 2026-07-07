@@ -14,21 +14,17 @@ impl<F> RungeKutta1<F> {
 impl<R, F> UnaryOp<R, f32_7> for RungeKutta1<F>
 where
     R: Runtime,
-    F: UnaryOp<R, f32_7, Output = f32_3>,
+    F: UnaryOp<R, f32_6, Output = f32_3>,
 {
-    // dt, F::Env
-    type Env = (f32, F::Env);
     type Output = f32_6;
 
-    fn apply(env: Self::Env, inp: f32_7) -> f32_6 {
-        let (dt, env1) = env;
-        let (x, y, z, u, v, w, m) = inp;
+    fn apply(inp: f32_7) -> f32_6 {
+        let (x, y, z, u, v, w, dt) = inp;
         let p = (x, y, z);
         let c = (u, v, w);
-        let force = F::apply(env1, inp);
-        let a = f32_3_div(force, m);
+        let force = F::apply((x, y, z, u, v, w));
         let new_p = f32_3_add(p, f32_3_mul(c, dt));
-        let new_c = f32_3_add(c, f32_3_mul(a, dt));
+        let new_c = f32_3_add(c, f32_3_mul(force, dt));
         let (x, y, z) = new_p;
         let (u, v, w) = new_c;
         (x, y, z, u, v, w)
@@ -41,12 +37,26 @@ mod tests {
 
     #[test]
     fn runge_kutta_1_constant_force() {
-        let before = (0.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0);
-        let after = <RungeKutta1<massively::op::Constant<f32_3>> as UnaryOp<
-            cubecl::wgpu::WgpuRuntime,
-            f32_7,
-        >>::apply((0.2_f32, (-1.0_f32, 0.0, 0.0)), before);
+        struct ConstantForce;
+        #[cube]
+        impl<R: Runtime> UnaryOp<R, f32_6> for ConstantForce {
+            type Output = f32_3;
+            fn apply(_: f32_6) -> f32_3 {
+                (-1.0_f32, 0.0_f32, 0.0_f32)
+            }
+        }
 
-        assert_eq!(after, (0.2, 0.0, 0.0, 0.8, 0.0, 0.0));
+        let before = (
+            0.0_f32, 0.0_f32, 0.0_f32, 1.0_f32, 0.0_f32, 0.0_f32, 0.2_f32,
+        );
+        let after =
+            <RungeKutta1<ConstantForce> as UnaryOp<cubecl::wgpu::WgpuRuntime, f32_7>>::apply(
+                before,
+            );
+
+        assert_eq!(
+            after,
+            (0.2_f32, 0.0_f32, 0.0_f32, 0.8_f32, 0.0_f32, 0.0_f32)
+        );
     }
 }
