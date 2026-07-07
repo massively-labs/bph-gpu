@@ -29,12 +29,7 @@ where
         cell_v.slice_mut(..),
     )?;
 
-    massively::scatter(
-        exec,
-        cell_v.slice(..n),
-        cell_idx.0.slice(..n),
-        out,
-    )?;
+    massively::scatter(exec, cell_v.slice(..n), cell_idx.0.slice(..n), out)?;
 
     counting::bucket_counting(exec, idx, counts)
 }
@@ -57,8 +52,8 @@ mod tests {
         let exec = super::test_executor();
         let idx = exec.to_device(&[0_u32, 0, 2, 2, 2]).unwrap();
         let v = exec.to_device(&[1_u32, 2, 3, 4, 5]).unwrap();
-        let sum = Zip1(exec.constant(3, 0_u32).unwrap());
-        let counts = exec.constant(3, 0_u32).unwrap();
+        let sum = Zip1(exec.full(3, 0_u32).unwrap());
+        let counts = exec.full(3, 0_u32).unwrap();
 
         reduce_by_bucket(
             &exec,

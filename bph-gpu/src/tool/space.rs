@@ -101,10 +101,11 @@ impl Space {
 
 pub struct CalcCellIndex1d;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_3> for CalcCellIndex1d {
-    type Env = Space;
+impl<R: Runtime> UnaryOp<R, (f32, f32, f32, u32)> for CalcCellIndex1d {
     type Output = (u32,);
-    fn apply(cell: Space, x: f32_3) -> (u32,) {
-        (cell.calc_cell_index_1d(x.0, x.1, x.2),)
+    fn apply(input: (f32, f32, f32, u32)) -> (u32,) {
+        let (x, origin_x, space_x, dim_x) = input;
+        let i = ((x - origin_x) / space_x) as u32;
+        (i.min(dim_x - 1),)
     }
 }

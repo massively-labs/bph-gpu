@@ -1,8 +1,6 @@
-use bph_gpu::tool::boundary::{
-    Negate, OutHi, OutLo, Range, RangeLaunch, ReflectLo, WrapHi, WrapLo,
-};
+use bph_gpu::tool::boundary::{Negate, OutHi, OutLo, Range, ReflectLo, WrapHi, WrapLo};
 use bph_gpu::tool::force::NoForce;
-use bph_gpu::tool::space::{CalcCellIndex1d, Space, SpaceLaunch};
+use bph_gpu::tool::space::{CalcCellIndex1d, Space};
 use bph_gpu::tool::streaming::RungeKutta1;
 use clap::Parser;
 use cubecl::{Runtime, cube, prelude::*};
@@ -26,36 +24,36 @@ struct Args {
 struct AddVelocity;
 
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32,)> for AddVelocity {
-    type Env = f32;
+impl<R: Runtime> UnaryOp<R, (f32, f32)> for AddVelocity {
     type Output = (f32,);
 
-    fn apply(u0: f32, inp: (f32,)) -> (f32,) {
-        (inp.0 + u0,)
+    fn apply(inp: (f32, f32)) -> (f32,) {
+        let (u, u0) = inp;
+        (u + u0,)
     }
 }
 
 struct ScaleVelocity;
 
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32, f32, f32)> for ScaleVelocity {
-    type Env = f32;
+impl<R: Runtime> UnaryOp<R, (f32, f32, f32, f32)> for ScaleVelocity {
     type Output = (f32, f32, f32);
 
-    fn apply(scale: f32, inp: (f32, f32, f32)) -> (f32, f32, f32) {
-        (inp.0 * scale, inp.1 * scale, inp.2 * scale)
+    fn apply(inp: (f32, f32, f32, f32)) -> (f32, f32, f32) {
+        let (u, v, w, scale) = inp;
+        (u * scale, v * scale, w * scale)
     }
 }
 
 struct OutXHiClosed;
 
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32,)> for OutXHiClosed {
-    type Env = f32;
-    type Output = (u32,);
+impl<R: Runtime> UnaryOp<R, (f32, f32)> for OutXHiClosed {
+    type Output = bool;
 
-    fn apply(hi: f32, inp: (f32,)) -> (u32,) {
-        if inp.0 >= hi { (1u32,) } else { (0u32,) }
+    fn apply(inp: (f32, f32)) -> bool {
+        let (x, hi) = inp;
+        x >= hi
     }
 }
 
@@ -70,13 +68,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let space = Space::new((0., 0., 0.), (dt, 1., 1.), (n_cell, 1, 1));
     let exec = Executor::<cubecl::wgpu::WgpuRuntime>::new(cubecl::wgpu::WgpuDevice::DefaultDevice);
 
-    let mut x = exec.constant(n_particle, 0. as f32)?;
-    let mut y = exec.constant(n_particle, 0. as f32)?;
-    let mut z = exec.constant(n_particle, 0. as f32)?;
-    let mut u = exec.constant(n_particle, 0. as f32)?;
-    let mut v = exec.constant(n_particle, 0. as f32)?;
-    let mut w = exec.constant(n_particle, 0. as f32)?;
-    let mut in_e = exec.constant(n_particle, 0. as f32)?;
+    let mut x = exec.full(n_particle, 0. as f32)?;
+    let mut y = exec.full(n_particle, 0. as f32)?;
+    let mut z = exec.full(n_particle, 0. as f32)?;
+    let mut u = exec.full(n_particle, 0. as f32)?;
+    let mut v = exec.full(n_particle, 0. as f32)?;
+    let mut w = exec.full(n_particle, 0. as f32)?;
+    let mut in_e = exec.full(n_particle, 0. as f32)?;
 
     for i in 0..n_cell {
         let cell = space.get_cell_at(i, 0, 0);
@@ -93,9 +91,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     massively::transform(
         &exec,
-        Zip3(u.slice(..), v.slice(..), w.slice(..)),
+        Zip4(
+            u.slice(..),
+            v.slice(..),
+            w.slice(..),
+            massively::lazy::constant(3_f32.sqrt()).take(u.len()),
+        ),
         ScaleVelocity,
-        3_f32.sqrt(),
         Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )?;
 
@@ -134,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     v = sorted_v;
     w = sorted_w;
 
-    let mass = exec.constant(x.len() as u32, 1. as f32)?;
+    let mass = exec.full(x.len() as u32, 1. as f32)?;
     in_e = bph_gpu::tool::calc_in_e::calc_in_e(
         &exec,
         u.slice(..),
@@ -147,14 +149,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     massively::transform(
         &exec,
-        Zip1(u.slice(..)),
+        Zip2(
+            u.slice(..),
+            massively::lazy::constant(args.u0).take(u.len()),
+        ),
         AddVelocity,
-        args.u0,
         Zip1(u.slice_mut(..)),
     )?;
 
     for step in 0..end_step {
-        let mass = exec.constant(x.len() as u32, 1. as f32)?;
+        let mass = exec.full(x.len() as u32, 1. as f32)?;
         let Zip1(idx) = calc_idx(&exec, &x, &y, &z, dt, n_cell)?;
         let Zip1(sorted_idx) = exec.alloc::<(u32,)>(idx.len())?;
         let Zip7(sorted_x, sorted_y, sorted_z, sorted_u, sorted_v, sorted_w, sorted_in_e) =
@@ -214,10 +218,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 u.slice(..),
                 v.slice(..),
                 w.slice(..),
-                mass.slice(..),
+                massively::lazy::constant(dt).take(x.len()),
             ),
             RungeKutta1::<NoForce>::new(),
-            (dt, ()),
             Zip6(
                 x.slice_mut(..),
                 y.slice_mut(..),
@@ -245,7 +248,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             massively::op::Less,
             Zip1(sorted_idx.slice_mut(..)),
         )?;
-        let counts = exec.constant(n_cell, 0_u32)?;
+        let counts = exec.full(n_cell, 0_u32)?;
         bph_gpu::algorithm::bucket_counting(&exec, sorted_idx.slice(..), counts.slice_mut(..))?;
         let counts = exec.to_host(&counts)?;
         write_density_1d(out, &counts, n)?;
@@ -303,9 +306,13 @@ fn calc_idx<R: Runtime>(
     let Zip1(idx) = exec.alloc::<(u32,)>(x.len())?;
     massively::transform(
         exec,
-        Zip3(x.slice(..), y.slice(..), z.slice(..)),
+        Zip4(
+            x.slice(..),
+            massively::lazy::constant(0.0_f32).take(x.len()),
+            massively::lazy::constant(dt).take(x.len()),
+            massively::lazy::constant(n_cell).take(x.len()),
+        ),
         CalcCellIndex1d,
-        SpaceLaunch::new((0., 0., 0.), (dt, 1., 1.), (n_cell, 1, 1)),
         Zip1(idx.slice_mut(..)),
     )?;
     Ok(Zip1(idx))
@@ -317,37 +324,41 @@ fn apply_periodic<R: Runtime>(
     lo: f32,
     hi: f32,
 ) -> bph_gpu::Error<()> {
-    let Zip1(out_lo) = exec.alloc::<(u32,)>(values.len())?;
-    massively::transform(
-        exec,
-        Zip1(values.slice(..)),
+    let out_lo = massively::lazy::transform(
+        Zip2(
+            values.slice(..),
+            massively::lazy::constant(lo).take(values.len()),
+        ),
         OutLo,
-        lo,
-        Zip1(out_lo.slice_mut(..)),
-    )?;
+    );
     massively::transform_where(
         exec,
-        Zip1(values.slice(..)),
+        Zip3(
+            values.slice(..),
+            massively::lazy::constant(lo).take(values.len()),
+            massively::lazy::constant(hi).take(values.len()),
+        ),
         WrapLo,
-        RangeLaunch::new(lo, hi),
-        out_lo.slice(..),
+        out_lo,
         Zip1(values.slice_mut(..)),
     )?;
 
-    let Zip1(out_hi) = exec.alloc::<(u32,)>(values.len())?;
-    massively::transform(
-        exec,
-        Zip1(values.slice(..)),
+    let out_hi = massively::lazy::transform(
+        Zip2(
+            values.slice(..),
+            massively::lazy::constant(hi).take(values.len()),
+        ),
         OutHi,
-        hi,
-        Zip1(out_hi.slice_mut(..)),
-    )?;
+    );
     massively::transform_where(
         exec,
-        Zip1(values.slice(..)),
+        Zip3(
+            values.slice(..),
+            massively::lazy::constant(lo).take(values.len()),
+            massively::lazy::constant(hi).take(values.len()),
+        ),
         WrapHi,
-        RangeLaunch::new(lo, hi),
-        out_hi.slice(..),
+        out_hi,
         Zip1(values.slice_mut(..)),
     )?;
 
@@ -359,28 +370,35 @@ fn apply_reflect_lo_x<R: Runtime>(
     x: &mut DeviceVec<R, f32>,
     u: &mut DeviceVec<R, f32>,
 ) -> bph_gpu::Error<()> {
-    let Zip1(out_lo) = exec.alloc::<(u32,)>(x.len())?;
-    massively::transform(
-        exec,
-        Zip1(x.slice(..)),
+    let out_lo = massively::lazy::transform(
+        Zip2(
+            x.slice(..),
+            massively::lazy::constant(0.0_f32).take(x.len()),
+        ),
         OutLo,
-        0.,
-        Zip1(out_lo.slice_mut(..)),
-    )?;
+    );
     massively::transform_where(
         exec,
         Zip1(u.slice(..)),
         Negate,
-        (),
-        out_lo.slice(..),
+        out_lo,
         Zip1(u.slice_mut(..)),
     )?;
+    let out_lo = massively::lazy::transform(
+        Zip2(
+            x.slice(..),
+            massively::lazy::constant(0.0_f32).take(x.len()),
+        ),
+        OutLo,
+    );
     massively::transform_where(
         exec,
-        Zip1(x.slice(..)),
+        Zip2(
+            x.slice(..),
+            massively::lazy::constant(0.0_f32).take(x.len()),
+        ),
         ReflectLo,
-        0.,
-        out_lo.slice(..),
+        out_lo,
         Zip1(x.slice_mut(..)),
     )?;
 
@@ -397,14 +415,13 @@ fn remove_right_outflow<R: Runtime>(
     w: &mut DeviceVec<R, f32>,
     in_e: &mut DeviceVec<R, f32>,
 ) -> bph_gpu::Error<()> {
-    let Zip1(out_hi) = exec.alloc::<(u32,)>(x.len())?;
-    massively::transform(
-        exec,
-        Zip1(x.slice(..)),
+    let out_hi = massively::lazy::transform(
+        Zip2(
+            x.slice(..),
+            massively::lazy::constant(1.0_f32).take(x.len()),
+        ),
         OutXHiClosed,
-        1.,
-        Zip1(out_hi.slice_mut(..)),
-    )?;
+    );
     let tmp = exec.alloc::<(f32, f32, f32, f32, f32, f32, f32)>(x.len())?;
     let n = massively::remove_where(
         exec,
@@ -417,16 +434,15 @@ fn remove_right_outflow<R: Runtime>(
             w.slice(..),
             in_e.slice(..),
         ),
-        out_hi.slice(..),
+        out_hi,
         tmp.slice_mut(..),
     )?;
     let Zip7(new_x, new_y, new_z, new_u, new_v, new_w, new_in_e) =
         exec.alloc::<(f32, f32, f32, f32, f32, f32, f32)>(n)?;
-    let indices = exec.counting(n)?;
-    massively::gather(
+    massively::copy_where(
         exec,
         tmp.slice(..n),
-        indices.slice(..),
+        massively::lazy::constant(true).take(n),
         Zip7(
             new_x.slice_mut(..),
             new_y.slice_mut(..),

@@ -17,14 +17,13 @@ pub fn calc_in_e<R: Runtime>(
         exec,
         Zip4(u, v, w, m),
         calc_kin_e::CalcKinE,
-        (),
         Zip1(kietic_e.slice_mut(..)),
     )
     .unwrap();
 
     // Compute the kinetic energy sum for each cell.
-    let Zip1(sum_kinetic_e) = Zip1(exec.constant(k, 0_f32).unwrap());
-    let cnt = exec.constant(k, 0_u32).unwrap();
+    let Zip1(sum_kinetic_e) = Zip1(exec.full(k, 0_f32).unwrap());
+    let cnt = exec.full(k, 0_u32).unwrap();
     algorithm::reduce_by_bucket(
         exec,
         idx.slice(..),
@@ -40,9 +39,11 @@ pub fn calc_in_e<R: Runtime>(
     let Zip1(sum_in_e) = exec.alloc::<(f32,)>(k).unwrap();
     massively::transform(
         exec,
-        Zip1(sum_kinetic_e.slice(..)),
+        Zip2(
+            sum_kinetic_e.slice(..),
+            massively::lazy::constant(s).take(sum_kinetic_e.len()),
+        ),
         CalcInE,
-        s,
         Zip1(sum_in_e.slice_mut(..)),
     )
     .unwrap();
@@ -53,7 +54,6 @@ pub fn calc_in_e<R: Runtime>(
         exec,
         Zip2(sum_in_e.slice(..), cnt.slice(..)),
         common::CellAve_F32_1,
-        (),
         Zip1(in_e.slice_mut(..)),
     )
     .unwrap();
@@ -73,12 +73,10 @@ pub fn calc_in_e<R: Runtime>(
 
 struct CalcInE;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_1> for CalcInE {
-    type Env = f32;
+impl<R: Runtime> UnaryOp<R, f32_2> for CalcInE {
     type Output = f32_1;
-    fn apply(env: Self::Env, inp: f32_1) -> f32_1 {
-        let (x,) = inp;
-        let s = env;
+    fn apply(inp: f32_2) -> f32_1 {
+        let (x, s) = inp;
         (x * s / 3.,)
     }
 }

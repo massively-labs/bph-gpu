@@ -18,11 +18,11 @@ pub fn alloc_balanced_shell_rand<R: Runtime>(
     );
 
     let Zip3(cell_sum_u, cell_sum_v, cell_sum_w) = Zip3(
-        exec.constant(k, 0_f32).unwrap(),
-        exec.constant(k, 0_f32).unwrap(),
-        exec.constant(k, 0_f32).unwrap(),
+        exec.full(k, 0_f32).unwrap(),
+        exec.full(k, 0_f32).unwrap(),
+        exec.full(k, 0_f32).unwrap(),
     );
-    let cell_cnt = exec.constant(k, 0_u32).unwrap();
+    let cell_cnt = exec.full(k, 0_u32).unwrap();
     algorithm::reduce::reduce_by_bucket(
         exec,
         idx.slice(..),
@@ -41,14 +41,15 @@ pub fn alloc_balanced_shell_rand<R: Runtime>(
     let Zip3(cell_ave_u, cell_ave_v, cell_ave_w) = exec.alloc::<(f32, f32, f32)>(k).unwrap();
     massively::transform(
         exec,
-        Zip4(
-            cell_sum_u.slice(..),
-            cell_sum_v.slice(..),
-            cell_sum_w.slice(..),
+        Zip2(
+            Zip3(
+                cell_sum_u.slice(..),
+                cell_sum_v.slice(..),
+                cell_sum_w.slice(..),
+            ),
             cell_cnt.slice(..),
         ),
         common::CellAve_F32_3,
-        (),
         Zip3(
             cell_ave_u.slice_mut(..),
             cell_ave_v.slice_mut(..),
@@ -57,35 +58,19 @@ pub fn alloc_balanced_shell_rand<R: Runtime>(
     )
     .unwrap();
 
-    let Zip3(ave_u, ave_v, ave_w) = exec.alloc::<(f32, f32, f32)>(idx.len()).unwrap();
-    massively::gather(
-        exec,
+    let ave = massively::lazy::permute(
         Zip3(
             cell_ave_u.slice(..),
             cell_ave_v.slice(..),
             cell_ave_w.slice(..),
         ),
         idx.slice(..),
-        Zip3(
-            ave_u.slice_mut(..),
-            ave_v.slice_mut(..),
-            ave_w.slice_mut(..),
-        ),
-    )
-    .unwrap();
+    );
 
     massively::transform(
         exec,
-        Zip6(
-            u.slice(..),
-            v.slice(..),
-            w.slice(..),
-            ave_u.slice(..),
-            ave_v.slice(..),
-            ave_w.slice(..),
-        ),
+        Zip2(Zip3(u.slice(..), v.slice(..), w.slice(..)), ave),
         common::Sub_F32_3,
-        (),
         Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
@@ -118,13 +103,12 @@ pub fn relax<R: Runtime>(
             in_e.slice(..),
         ),
         calc_total_e::CalcTotalE,
-        (),
         Zip1(total_e.slice_mut(..)),
     )
     .unwrap();
 
-    let Zip1(cell_sum_total_e) = Zip1(exec.constant(k, 0_f32).unwrap());
-    let cell_cnt = exec.constant(k, 0_u32).unwrap();
+    let Zip1(cell_sum_total_e) = Zip1(exec.full(k, 0_f32).unwrap());
+    let cell_cnt = exec.full(k, 0_u32).unwrap();
     algorithm::reduce::reduce_by_bucket(
         exec,
         idx.slice(..),
@@ -140,27 +124,10 @@ pub fn relax<R: Runtime>(
     // and internal energy.
     // Cells with fewer than two particles cannot collide; redistributing their
     // energy would artificially lose energy.
-    let Zip1(collision_stencil) = {
-        let Zip1(tmp) = exec.alloc::<(u32,)>(idx.len()).unwrap();
-        massively::gather(
-            exec,
-            Zip1(cell_cnt.slice(..)),
-            idx.slice(..),
-            Zip1(tmp.slice_mut(..)),
-        )
-        .unwrap();
-
-        let Zip1(collision_stencil) = exec.alloc::<(u32,)>(idx.len()).unwrap();
-        massively::transform(
-            exec,
-            Zip1(tmp.slice(..)),
-            IsCollidable,
-            (),
-            Zip1(collision_stencil.slice_mut(..)),
-        )
-        .unwrap();
-        Zip1(collision_stencil)
-    };
+    let collision_stencil = massively::lazy::transform(
+        massively::lazy::permute(Zip1(cell_cnt.slice(..)), idx.slice(..)),
+        IsCollidable,
+    );
 
     // -----------------------------------------------------------------
     // 2. Assign shell-distributed velocities.
@@ -186,13 +153,12 @@ pub fn relax<R: Runtime>(
         exec,
         Zip4(u.slice(..), v.slice(..), w.slice(..), m.slice(..)),
         calc_kin_e::CalcKinE,
-        (),
         Zip1(kinetic_e.slice_mut(..)),
     )
     .unwrap();
 
-    let Zip1(cell_sum_kin_e) = Zip1(exec.constant(k, 0_f32).unwrap());
-    let cell_cnt_tmp = exec.constant(k, 0_u32).unwrap();
+    let Zip1(cell_sum_kin_e) = Zip1(exec.full(k, 0_f32).unwrap());
+    let cell_cnt_tmp = exec.full(k, 0_u32).unwrap();
     algorithm::reduce_by_bucket(
         exec,
         idx.slice(..),
@@ -209,9 +175,11 @@ pub fn relax<R: Runtime>(
     let Zip1(cell_sum_tobe_kin_e) = exec.alloc::<(f32,)>(k).unwrap();
     massively::transform(
         exec,
-        Zip1(cell_sum_total_e.slice(..)),
+        Zip2(
+            cell_sum_total_e.slice(..),
+            massively::lazy::constant(s).take(cell_sum_total_e.len()),
+        ),
         DistributeKinE,
-        s,
         Zip1(cell_sum_tobe_kin_e.slice_mut(..)),
     )
     .unwrap();
@@ -223,26 +191,20 @@ pub fn relax<R: Runtime>(
         exec,
         Zip2(cell_sum_tobe_kin_e.slice(..), cell_sum_kin_e.slice(..)),
         CalcVelocityRatio,
-        (),
         Zip1(cell_vel_ratio.slice_mut(..)),
     )
     .unwrap();
 
     // 3.4 Scale velocities by the ratio.
-    let Zip1(vel_ratio) = exec.alloc::<(f32,)>(idx.len()).unwrap();
-    massively::gather(
-        exec,
-        Zip1(cell_vel_ratio.slice(..)),
-        idx.slice(..),
-        Zip1(vel_ratio.slice_mut(..)),
-    )
-    .unwrap();
-
     massively::transform(
         exec,
-        Zip4(u.slice(..), v.slice(..), w.slice(..), vel_ratio.slice(..)),
+        Zip4(
+            u.slice(..),
+            v.slice(..),
+            w.slice(..),
+            massively::lazy::permute(cell_vel_ratio.slice(..), idx.slice(..)),
+        ),
         ScaleVelocity,
-        (),
         Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
@@ -255,9 +217,11 @@ pub fn relax<R: Runtime>(
     let Zip1(cell_sum_tobe_in_e) = exec.alloc::<(f32,)>(k).unwrap();
     massively::transform(
         exec,
-        Zip1(cell_sum_total_e.slice(..)),
+        Zip2(
+            cell_sum_total_e.slice(..),
+            massively::lazy::constant(s).take(cell_sum_total_e.len()),
+        ),
         DistributeInE,
-        s,
         Zip1(cell_sum_tobe_in_e.slice_mut(..)),
     )
     .unwrap();
@@ -267,7 +231,6 @@ pub fn relax<R: Runtime>(
         exec,
         Zip2(cell_sum_tobe_in_e.slice(..), cell_cnt.slice(..)),
         common::CellAve_F32_1,
-        (),
         Zip1(cell_tobe_in_e.slice_mut(..)),
     )
     .unwrap();
@@ -285,35 +248,29 @@ pub fn relax<R: Runtime>(
 struct IsCollidable;
 #[cube]
 impl<R: Runtime> UnaryOp<R, (u32,)> for IsCollidable {
-    type Env = ();
-    type Output = (u32,);
-    fn apply(_: (), inp: (u32,)) -> (u32,) {
+    type Output = bool;
+    fn apply(inp: (u32,)) -> bool {
         let n = inp.0;
-        let v = if n >= 2 { 1u32 } else { 0u32 };
-        (v,)
+        n >= 2
     }
 }
 
 struct DistributeKinE;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_1> for DistributeKinE {
-    type Env = f32;
+impl<R: Runtime> UnaryOp<R, f32_2> for DistributeKinE {
     type Output = f32_1;
-    fn apply(env: f32, inp: f32_1) -> f32_1 {
-        let (total_e,) = inp;
-        let s = env;
+    fn apply(inp: f32_2) -> f32_1 {
+        let (total_e, s) = inp;
         (total_e * 3. / (3. + s),)
     }
 }
 
 struct DistributeInE;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_1> for DistributeInE {
-    type Env = f32;
+impl<R: Runtime> UnaryOp<R, f32_2> for DistributeInE {
     type Output = f32_1;
-    fn apply(env: f32, inp: f32_1) -> f32_1 {
-        let (total_e,) = inp;
-        let s = env;
+    fn apply(inp: f32_2) -> f32_1 {
+        let (total_e, s) = inp;
         (total_e * s / (3. + s),)
     }
 }
@@ -321,9 +278,8 @@ impl<R: Runtime> UnaryOp<R, f32_1> for DistributeInE {
 struct CalcVelocityRatio;
 #[cube]
 impl<R: Runtime> UnaryOp<R, f32_2> for CalcVelocityRatio {
-    type Env = ();
     type Output = f32_1;
-    fn apply(_: (), inp: f32_2) -> f32_1 {
+    fn apply(inp: f32_2) -> f32_1 {
         let (x, y) = inp;
         let v = if y == 0. { 0. as f32 } else { (x / y).sqrt() };
         (v,)
@@ -333,9 +289,8 @@ impl<R: Runtime> UnaryOp<R, f32_2> for CalcVelocityRatio {
 struct ScaleVelocity;
 #[cube]
 impl<R: Runtime> UnaryOp<R, f32_4> for ScaleVelocity {
-    type Env = ();
     type Output = f32_3;
-    fn apply(_: (), inp: f32_4) -> f32_3 {
+    fn apply(inp: f32_4) -> f32_3 {
         let (u, v, w, ratio) = inp;
         (u * ratio, v * ratio, w * ratio)
     }

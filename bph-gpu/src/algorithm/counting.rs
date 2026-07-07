@@ -8,22 +8,22 @@ pub fn bucket_counting<R: Runtime>(
     out: DeviceSliceMut<R, u32>,
 ) -> Result<(), massively::Error> {
     let k = out.len();
-    let counting = exec.counting(k)?;
+    let counting = massively::lazy::counting(0).take(k);
 
-    let begin = exec.constant(k, 0_u32)?;
+    let begin = exec.full(k, 0_u32)?;
     massively::lower_bound(
         exec,
         Zip1(idx.slice(..)),
-        Zip1(counting.slice(..)),
+        Zip1(counting),
         OrderingU32,
         begin.slice_mut(..),
     )?;
 
-    let end = exec.constant(k, 0_u32)?;
+    let end = exec.full(k, 0_u32)?;
     massively::upper_bound(
         exec,
         Zip1(idx.slice(..)),
-        Zip1(counting.slice(..)),
+        Zip1(massively::lazy::counting(0).take(k)),
         OrderingU32,
         end.slice_mut(..),
     )?;
@@ -32,7 +32,6 @@ pub fn bucket_counting<R: Runtime>(
         exec,
         Zip2(end.slice(..), begin.slice(..)),
         CalcDiff,
-        (),
         Zip1(out),
     )
 }
@@ -48,9 +47,8 @@ impl<R: Runtime> BinaryPredicateOp<R, (u32,)> for OrderingU32 {
 struct CalcDiff;
 #[cube]
 impl<R: Runtime> UnaryOp<R, (u32, u32)> for CalcDiff {
-    type Env = ();
     type Output = (u32,);
-    fn apply(_env: (), x: (u32, u32)) -> (u32,) {
+    fn apply(x: (u32, u32)) -> (u32,) {
         let (end, begin) = x;
         (end - begin,)
     }
@@ -63,7 +61,7 @@ mod tests {
     fn test_bucket_counting() {
         let exec = super::test_executor();
         let idx = exec.to_device(&[0_u32, 0, 2, 2, 2, 2]).unwrap();
-        let counts = exec.constant(3, 0_u32).unwrap();
+        let counts = exec.full(3, 0_u32).unwrap();
 
         bucket_counting(&exec, idx.slice(..), counts.slice_mut(..)).unwrap();
 

@@ -9,22 +9,22 @@ end
 namespace :run do
   desc "run shocktube test"
   task :shocktube => "dat" do
-    sh "cargo run -p shocktube -- 500 1000 2 0.15 --out dat/shocktube.dat"
+    sh "time cargo run -p shocktube -- 500 1000 2 0.15 --out dat/shocktube.dat"
   end
 
   desc "run wallshock test"
   task :wallshock => "dat" do
-    sh "cargo run -p wallshock -- 4000 1000 2 0.5 --out dat/wallshock.dat"
+    sh "time cargo run -p wallshock -- 4000 1000 2 0.5 --out dat/wallshock.dat"
   end
 
   desc "run Sjogreen test"
   task :sjogreen => "dat" do
-    sh "cargo run -p sjogreen -- 4000 1000 2 0.1 7 --out dat/sjogreen.dat"
+    sh "time cargo run -p sjogreen -- 4000 1000 2 0.1 7 --out dat/sjogreen.dat"
   end
 
   desc "run Noh 2D test"
   task :noh => "dat" do
-    sh "cargo run -p noh -- 100 100 2 0.5 --out dat/noh.dat"
+    sh "time cargo run -p noh -- 100 100 2 0.5 --out dat/noh.dat"
   end
 end
 
