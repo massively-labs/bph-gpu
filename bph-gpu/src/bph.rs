@@ -2,14 +2,14 @@ use super::*;
 
 pub fn bph<R: Runtime>(
     exec: &Executor<R>,
-    u: DeviceSliceMut<R, f32>,
-    v: DeviceSliceMut<R, f32>,
-    w: DeviceSliceMut<R, f32>,
-    m: DeviceSlice<R, f32>,       // Mass for each particle.
-    in_e: DeviceSliceMut<R, f32>, // Internal energy.
-    idx: DeviceSlice<R, u32>,     // Cell index for each particle.
-    k: u32,                       // Number of cells.
-    s: f32,                       // Degrees of freedom.
+    u: DeviceSliceMut<f32>,
+    v: DeviceSliceMut<f32>,
+    w: DeviceSliceMut<f32>,
+    m: DeviceSlice<f32>,       // Mass for each particle.
+    in_e: DeviceSliceMut<f32>, // Internal energy.
+    idx: DeviceSlice<u32>,     // Cell index for each particle.
+    k: u32,                    // Number of cells.
+    s: f32,                    // Degrees of freedom.
     seed: u64,
 ) {
     // Subtract average velocity.

@@ -3,26 +3,24 @@ use super::*;
 /// Subtracts the average velocity per cell and returns per-particle averages.
 pub fn sub_average_velocity<R: Runtime>(
     exec: &Executor<R>,
-    u: DeviceSliceMut<R, f32>,
-    v: DeviceSliceMut<R, f32>,
-    w: DeviceSliceMut<R, f32>,
-    idx: DeviceSlice<R, u32>,
+    u: DeviceSliceMut<f32>,
+    v: DeviceSliceMut<f32>,
+    w: DeviceSliceMut<f32>,
+    idx: DeviceSlice<u32>,
     k: u32,
 ) -> (DeviceVec<R, f32>, DeviceVec<R, f32>, DeviceVec<R, f32>) {
     // Compute total velocity and particle count for each cell.
-    let Zip3(cell_sum_u, cell_sum_v, cell_sum_w) = Zip3(
-        exec.full(k, 0_f32).unwrap(),
-        exec.full(k, 0_f32).unwrap(),
-        exec.full(k, 0_f32).unwrap(),
-    );
-    let cell_cnt = exec.full(k, 0_u32).unwrap();
+    let cell_sum_u = exec.full(k as usize, 0_f32).unwrap();
+    let cell_sum_v = exec.full(k as usize, 0_f32).unwrap();
+    let cell_sum_w = exec.full(k as usize, 0_f32).unwrap();
+    let cell_cnt = exec.full(k as usize, 0_u32).unwrap();
     algorithm::reduce_by_bucket(
         exec,
         idx.slice(..),
-        Zip3(u.slice(..), v.slice(..), w.slice(..)),
-        (0.0, 0.0, 0.0),
+        zip3(u.slice(..), v.slice(..), w.slice(..)),
+        tuple3(0.0, 0.0, 0.0),
         common::Add_F32_3,
-        Zip3(
+        zip3(
             cell_sum_u.slice_mut(..),
             cell_sum_v.slice_mut(..),
             cell_sum_w.slice_mut(..),
@@ -32,11 +30,11 @@ pub fn sub_average_velocity<R: Runtime>(
     .unwrap();
 
     // Compute average velocity.
-    let Zip3(cell_ave_u, cell_ave_v, cell_ave_w) = exec.alloc::<(f32, f32, f32)>(k).unwrap();
+    let Zip(Zip(cell_ave_u, cell_ave_v), cell_ave_w) = exec.alloc::<f32_3>(k as usize);
     massively::transform(
         exec,
-        Zip2(
-            Zip3(
+        zip2(
+            zip3(
                 cell_sum_u.slice(..),
                 cell_sum_v.slice(..),
                 cell_sum_w.slice(..),
@@ -44,7 +42,7 @@ pub fn sub_average_velocity<R: Runtime>(
             cell_cnt.slice(..),
         ),
         common::CellAve_F32_3,
-        Zip3(
+        zip3(
             cell_ave_u.slice_mut(..),
             cell_ave_v.slice_mut(..),
             cell_ave_w.slice_mut(..),
@@ -53,16 +51,16 @@ pub fn sub_average_velocity<R: Runtime>(
     .unwrap();
 
     // Subtract average velocity.
-    let Zip3(ave_u, ave_v, ave_w) = exec.alloc::<(f32, f32, f32)>(idx.len()).unwrap();
+    let Zip(Zip(ave_u, ave_v), ave_w) = exec.alloc::<f32_3>(idx.len());
     massively::gather(
         exec,
-        Zip3(
+        zip3(
             cell_ave_u.slice(..),
             cell_ave_v.slice(..),
             cell_ave_w.slice(..),
         ),
         idx.slice(..),
-        Zip3(
+        zip3(
             ave_u.slice_mut(..),
             ave_v.slice_mut(..),
             ave_w.slice_mut(..),
@@ -72,12 +70,12 @@ pub fn sub_average_velocity<R: Runtime>(
 
     massively::transform(
         exec,
-        Zip2(
-            Zip3(u.slice(..), v.slice(..), w.slice(..)),
-            Zip3(ave_u.slice(..), ave_v.slice(..), ave_w.slice(..)),
+        zip2(
+            zip3(u.slice(..), v.slice(..), w.slice(..)),
+            zip3(ave_u.slice(..), ave_v.slice(..), ave_w.slice(..)),
         ),
         common::Sub_F32_3,
-        Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
+        zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
 
@@ -86,34 +84,32 @@ pub fn sub_average_velocity<R: Runtime>(
 
 struct AddAve;
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32_3, f32_3)> for AddAve {
+impl UnaryOp<(f32_3, f32_3)> for AddAve {
     type Output = f32_3;
 
     fn apply(x: (f32_3, f32_3)) -> f32_3 {
-        let (u, v, w) = x.0;
-        let (au, av, aw) = x.1;
-        (u + au, v + av, w + aw)
+        f32_3_add(x.0, x.1)
     }
 }
 
 /// Adds previously subtracted average velocity back.
 pub fn add_average_velocity<R: Runtime>(
     exec: &Executor<R>,
-    u: DeviceSliceMut<R, f32>,
-    v: DeviceSliceMut<R, f32>,
-    w: DeviceSliceMut<R, f32>,
-    ave_u: DeviceSlice<R, f32>,
-    ave_v: DeviceSlice<R, f32>,
-    ave_w: DeviceSlice<R, f32>,
+    u: DeviceSliceMut<f32>,
+    v: DeviceSliceMut<f32>,
+    w: DeviceSliceMut<f32>,
+    ave_u: DeviceSlice<f32>,
+    ave_v: DeviceSlice<f32>,
+    ave_w: DeviceSlice<f32>,
 ) {
     massively::transform(
         exec,
-        Zip2(
-            Zip3(u.slice(..), v.slice(..), w.slice(..)),
-            Zip3(ave_u, ave_v, ave_w),
+        zip2(
+            zip3(u.slice(..), v.slice(..), w.slice(..)),
+            zip3(ave_u, ave_v, ave_w),
         ),
         AddAve,
-        Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
+        zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )
     .unwrap();
 }
@@ -154,10 +150,10 @@ mod tests {
             (host_u, host_v, host_w, host_idx, k) in velocity_case()
         ) {
             let exec = super::test_executor();
-            let u = exec.to_device(&host_u).unwrap();
-            let v = exec.to_device(&host_v).unwrap();
-            let w = exec.to_device(&host_w).unwrap();
-            let idx = exec.to_device(&host_idx).unwrap();
+            let u = exec.to_device(&host_u);
+            let v = exec.to_device(&host_v);
+            let w = exec.to_device(&host_w);
+            let idx = exec.to_device(&host_idx);
 
             let (ave_u, ave_v, ave_w) = sub_average_velocity(
                 &exec,

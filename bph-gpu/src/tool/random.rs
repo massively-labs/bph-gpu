@@ -4,12 +4,13 @@ use super::*;
 
 pub fn alloc_uniform_random<R: Runtime>(
     exec: &Executor<R>,
-    x: DeviceSliceMut<R, f32>,
+    x: DeviceSliceMut<f32>,
     range: Range,
     seed: u64,
 ) {
     let n = x.len();
-    let xs = massively::util::random::uniform_distribution_f32(exec, n, range.lo, range.hi, seed)
-        .unwrap();
-    exec.copy(xs.slice(..), x).unwrap();
+    let xs = massively::util::random::uniform_f32(range.lo, range.hi, seed)
+        .unwrap()
+        .take(n as u32);
+    massively::transform(exec, xs, massively::op::Identity, x).unwrap();
 }

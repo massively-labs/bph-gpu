@@ -2,9 +2,9 @@ use super::*;
 
 pub struct NoForce;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_6> for NoForce {
+impl UnaryOp<f32_6> for NoForce {
     type Output = f32_3;
     fn apply(_: f32_6) -> Self::Output {
-        (0. as f32, 0. as f32, 0. as f32)
+        tuple3(0_f32, 0_f32, 0_f32)
     }
 }

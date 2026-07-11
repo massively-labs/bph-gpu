@@ -4,17 +4,17 @@ use super::*;
 /// OUT: [2,0,4]
 pub fn bucket_counting<R: Runtime>(
     exec: &Executor<R>,
-    idx: DeviceSlice<R, u32>,
-    out: DeviceSliceMut<R, u32>,
+    idx: DeviceSlice<u32>,
+    out: DeviceSliceMut<u32>,
 ) -> Result<(), massively::Error> {
     let k = out.len();
-    let counting = massively::lazy::counting(0).take(k);
+    let counting = massively::lazy::counting(0).take(k as u32);
 
     let begin = exec.full(k, 0_u32)?;
     massively::lower_bound(
         exec,
-        Zip1(idx.slice(..)),
-        Zip1(counting),
+        idx.slice(..),
+        counting,
         OrderingU32,
         begin.slice_mut(..),
     )?;
@@ -22,35 +22,30 @@ pub fn bucket_counting<R: Runtime>(
     let end = exec.full(k, 0_u32)?;
     massively::upper_bound(
         exec,
-        Zip1(idx.slice(..)),
-        Zip1(massively::lazy::counting(0).take(k)),
+        idx.slice(..),
+        massively::lazy::counting(0).take(k as u32),
         OrderingU32,
         end.slice_mut(..),
     )?;
 
-    massively::transform(
-        exec,
-        Zip2(end.slice(..), begin.slice(..)),
-        CalcDiff,
-        Zip1(out),
-    )
+    massively::transform(exec, zip2(end.slice(..), begin.slice(..)), CalcDiff, out)
 }
 
 struct OrderingU32;
 #[cube]
-impl<R: Runtime> BinaryPredicateOp<R, (u32,)> for OrderingU32 {
-    fn apply(x: (u32,), y: (u32,)) -> bool {
-        x.0 < y.0
+impl BinaryPredicateOp<u32> for OrderingU32 {
+    fn apply(x: u32, y: u32) -> bool {
+        x < y
     }
 }
 
 struct CalcDiff;
 #[cube]
-impl<R: Runtime> UnaryOp<R, (u32, u32)> for CalcDiff {
-    type Output = (u32,);
-    fn apply(x: (u32, u32)) -> (u32,) {
+impl UnaryOp<(u32, u32)> for CalcDiff {
+    type Output = u32;
+    fn apply(x: (u32, u32)) -> u32 {
         let (end, begin) = x;
-        (end - begin,)
+        end - begin
     }
 }
 
@@ -60,7 +55,7 @@ mod tests {
     #[test]
     fn test_bucket_counting() {
         let exec = super::test_executor();
-        let idx = exec.to_device(&[0_u32, 0, 2, 2, 2, 2]).unwrap();
+        let idx = exec.to_device(&[0_u32, 0, 2, 2, 2, 2]);
         let counts = exec.full(3, 0_u32).unwrap();
 
         bucket_counting(&exec, idx.slice(..), counts.slice_mut(..)).unwrap();

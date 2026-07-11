@@ -4,7 +4,7 @@ use bph_gpu::tool::space::Space;
 use bph_gpu::tool::streaming::RungeKutta1;
 use clap::Parser;
 use cubecl::{Runtime, cube, prelude::*};
-use massively::op::UnaryOp;
+use massively::op::{BinaryPredicateOp, UnaryOp};
 use massively::prelude::*;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -23,50 +23,59 @@ struct Args {
 struct CalcCellIndexNoh2d;
 
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32, f32, f32, f32, u32)> for CalcCellIndexNoh2d {
-    type Output = (u32,);
+impl UnaryOp<Tuple5<f32, f32, f32, f32, u32>> for CalcCellIndexNoh2d {
+    type Output = u32;
 
-    fn apply(input: (f32, f32, f32, f32, u32)) -> (u32,) {
-        let (x, y, _z, cell_size, width) = input;
+    fn apply(input: Tuple5<f32, f32, f32, f32, u32>) -> u32 {
+        let (x, y, _z, cell_size, width) = flatten5(input);
         let i = (x / cell_size) as u32;
         let j = (y / cell_size) as u32;
-        (i * width + j,)
+        i * width + j
     }
 }
 
 struct OutOfCircle;
 
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32, f32, f32, f32, f32, f32, f32)> for OutOfCircle {
-    type Output = bool;
+impl UnaryOp<Tuple7<f32, f32, f32, f32, f32, f32, f32>> for OutOfCircle {
+    type Output = u32;
 
-    fn apply(input: (f32, f32, f32, f32, f32, f32, f32)) -> bool {
-        let (x, y, z, cx, cy, cz, rad) = input;
+    fn apply(input: Tuple7<f32, f32, f32, f32, f32, f32, f32>) -> u32 {
+        let (x, y, z, cx, cy, cz, rad) = flatten7(input);
         let dx = x - cx;
         let dy = y - cy;
         let dz = z - cz;
         let distance = (dx * dx + dy * dy + dz * dz).sqrt();
-        distance > rad
+        if distance > rad { 1u32 } else { 0u32 }
     }
 }
 
 struct VelocityTowardCenter;
 
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32, f32, f32, f32, f32, f32)> for VelocityTowardCenter {
-    type Output = (f32, f32, f32);
+impl UnaryOp<Tuple6<f32, f32, f32, f32, f32, f32>> for VelocityTowardCenter {
+    type Output = Tuple3<f32, f32, f32>;
 
-    fn apply(input: (f32, f32, f32, f32, f32, f32)) -> (f32, f32, f32) {
-        let (x, y, z, cx, cy, cz) = input;
+    fn apply(input: Tuple6<f32, f32, f32, f32, f32, f32>) -> Self::Output {
+        let (x, y, z, cx, cy, cz) = flatten6(input);
         let dx = cx - x;
         let dy = cy - y;
         let dz = cz - z;
         let len = (dx * dx + dy * dy + dz * dz).sqrt();
         if len == 0.0_f32 {
-            (0.0_f32, 0.0_f32, 0.0_f32)
+            tuple3(0.0_f32, 0.0_f32, 0.0_f32)
         } else {
-            (dx / len, dy / len, dz / len)
+            tuple3(dx / len, dy / len, dz / len)
         }
+    }
+}
+
+struct LessU32;
+
+#[cube]
+impl BinaryPredicateOp<u32> for LessU32 {
+    fn apply(lhs: u32, rhs: u32) -> bool {
+        lhs < rhs
     }
 }
 
@@ -77,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rad = 1.;
     let width = 2 * m;
     let n_cell = width * width;
-    let n_particle = n * n_cell;
+    let n_particle = (n * n_cell) as usize;
     let cell_size = rad / m as f32;
     let dt = 1. / m as f32;
     let end_step = (args.fin / dt) as u64;
@@ -98,7 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for j in 0..width {
             let cell = space.get_cell_at(i, j, 0);
             let cell_index = i * width + j;
-            let range = (n * cell_index)..(n * (cell_index + 1));
+            let range = ((n * cell_index) as usize)..((n * (cell_index + 1)) as usize);
             alloc_position_in_cell(&exec, &mut x, &mut y, &mut z, range, &cell, i);
         }
     }
@@ -109,28 +118,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     massively::transform(
         &exec,
-        Zip6(
+        zip6(
             x.slice(..),
             y.slice(..),
             z.slice(..),
-            massively::lazy::constant(center.0).take(x.len()),
-            massively::lazy::constant(center.1).take(x.len()),
-            massively::lazy::constant(center.2).take(x.len()),
+            massively::lazy::constant(center.0).take(x.len() as u32),
+            massively::lazy::constant(center.1).take(x.len() as u32),
+            massively::lazy::constant(center.2).take(x.len() as u32),
         ),
         VelocityTowardCenter,
-        Zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
+        zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
     )?;
 
     for step in 0..end_step {
-        let mass = exec.full(x.len() as u32, 1. as f32)?;
-        let Zip1(idx) = calc_idx(&exec, &x, &y, &z, cell_size, width)?;
-        let Zip1(sorted_idx) = exec.alloc::<(u32,)>(idx.len())?;
-        let Zip7(sorted_x, sorted_y, sorted_z, sorted_u, sorted_v, sorted_w, sorted_in_e) =
-            exec.alloc::<(f32, f32, f32, f32, f32, f32, f32)>(idx.len())?;
+        let mass = exec.full(x.len(), 1. as f32)?;
+        let idx = calc_idx(&exec, &x, &y, &z, cell_size, width)?;
+        let sorted_idx = exec.alloc::<u32>(idx.len());
+        let (sorted_x, sorted_y, sorted_z, sorted_u, sorted_v, sorted_w, sorted_in_e) =
+            alloc_f32x7(&exec, idx.len());
         massively::sort_by_key(
             &exec,
-            Zip1(idx.slice(..)),
-            Zip7(
+            idx.slice(..),
+            zip7(
                 x.slice(..),
                 y.slice(..),
                 z.slice(..),
@@ -139,9 +148,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 w.slice(..),
                 in_e.slice(..),
             ),
-            massively::op::Less,
-            Zip1(sorted_idx.slice_mut(..)),
-            Zip7(
+            LessU32,
+            sorted_idx.slice_mut(..),
+            zip7(
                 sorted_x.slice_mut(..),
                 sorted_y.slice_mut(..),
                 sorted_z.slice_mut(..),
@@ -175,17 +184,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         massively::transform(
             &exec,
-            Zip7(
+            zip7(
                 x.slice(..),
                 y.slice(..),
                 z.slice(..),
                 u.slice(..),
                 v.slice(..),
                 w.slice(..),
-                massively::lazy::constant(dt).take(x.len()),
+                massively::lazy::constant(dt).take(x.len() as u32),
             ),
             RungeKutta1::<NoForce>::new(),
-            Zip6(
+            zip6(
                 x.slice_mut(..),
                 y.slice_mut(..),
                 z.slice_mut(..),
@@ -197,15 +206,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(out) = args.out {
-        let Zip1(idx) = calc_idx(&exec, &x, &y, &z, cell_size, width)?;
-        let Zip1(sorted_idx) = exec.alloc::<(u32,)>(idx.len())?;
-        massively::sort(
-            &exec,
-            Zip1(idx.slice(..)),
-            massively::op::Less,
-            Zip1(sorted_idx.slice_mut(..)),
-        )?;
-        let counts = exec.full(n_cell, 0_u32)?;
+        let idx = calc_idx(&exec, &x, &y, &z, cell_size, width)?;
+        let sorted_idx = exec.alloc::<u32>(idx.len());
+        massively::sort(&exec, idx.slice(..), LessU32, sorted_idx.slice_mut(..))?;
+        let counts = exec.full(n_cell as usize, 0_u32)?;
         bph_gpu::algorithm::bucket_counting(&exec, sorted_idx.slice(..), counts.slice_mut(..))?;
         let counts = exec.to_host(&counts)?;
         write_density_matrix(out, &counts, width, n)?;
@@ -219,7 +223,7 @@ fn alloc_position_in_cell<R: Runtime>(
     x: &mut DeviceVec<R, f32>,
     y: &mut DeviceVec<R, f32>,
     z: &mut DeviceVec<R, f32>,
-    range: std::ops::Range<u32>,
+    range: std::ops::Range<usize>,
     cell: &bph_gpu::tool::space::Cell,
     seed: u32,
 ) {
@@ -259,21 +263,43 @@ fn calc_idx<R: Runtime>(
     z: &DeviceVec<R, f32>,
     cell_size: f32,
     width: u32,
-) -> bph_gpu::Error<Zip1<DeviceVec<R, u32>>> {
-    let Zip1(idx) = exec.alloc::<(u32,)>(x.len())?;
+) -> bph_gpu::Error<DeviceVec<R, u32>> {
+    let idx = exec.alloc::<u32>(x.len());
     massively::transform(
         exec,
-        Zip5(
+        zip5(
             x.slice(..),
             y.slice(..),
             z.slice(..),
-            massively::lazy::constant(cell_size).take(x.len()),
-            massively::lazy::constant(width).take(x.len()),
+            massively::lazy::constant(cell_size).take(x.len() as u32),
+            massively::lazy::constant(width).take(x.len() as u32),
         ),
         CalcCellIndexNoh2d,
-        Zip1(idx.slice_mut(..)),
+        idx.slice_mut(..),
     )?;
-    Ok(Zip1(idx))
+    Ok(idx)
+}
+
+type F32x7<R> = (
+    DeviceVec<R, f32>,
+    DeviceVec<R, f32>,
+    DeviceVec<R, f32>,
+    DeviceVec<R, f32>,
+    DeviceVec<R, f32>,
+    DeviceVec<R, f32>,
+    DeviceVec<R, f32>,
+);
+
+fn alloc_f32x7<R: Runtime>(exec: &Executor<R>, len: usize) -> F32x7<R> {
+    (
+        exec.alloc::<f32>(len),
+        exec.alloc::<f32>(len),
+        exec.alloc::<f32>(len),
+        exec.alloc::<f32>(len),
+        exec.alloc::<f32>(len),
+        exec.alloc::<f32>(len),
+        exec.alloc::<f32>(len),
+    )
 }
 
 fn remove_out_of_circle<R: Runtime>(
@@ -289,21 +315,21 @@ fn remove_out_of_circle<R: Runtime>(
     rad: f32,
 ) -> bph_gpu::Error<()> {
     let out_of_circle = massively::lazy::transform(
-        Zip7(
+        zip7(
             x.slice(..),
             y.slice(..),
             z.slice(..),
-            massively::lazy::constant(center.0).take(x.len()),
-            massively::lazy::constant(center.1).take(x.len()),
-            massively::lazy::constant(center.2).take(x.len()),
-            massively::lazy::constant(rad).take(x.len()),
+            massively::lazy::constant(center.0).take(x.len() as u32),
+            massively::lazy::constant(center.1).take(x.len() as u32),
+            massively::lazy::constant(center.2).take(x.len() as u32),
+            massively::lazy::constant(rad).take(x.len() as u32),
         ),
         OutOfCircle,
     );
-    let tmp = exec.alloc::<(f32, f32, f32, f32, f32, f32, f32)>(x.len())?;
+    let (tmp_x, tmp_y, tmp_z, tmp_u, tmp_v, tmp_w, tmp_in_e) = alloc_f32x7(exec, x.len());
     let n = massively::remove_where(
         exec,
-        Zip7(
+        zip7(
             x.slice(..),
             y.slice(..),
             z.slice(..),
@@ -313,15 +339,30 @@ fn remove_out_of_circle<R: Runtime>(
             in_e.slice(..),
         ),
         out_of_circle,
-        tmp.slice_mut(..),
+        zip7(
+            tmp_x.slice_mut(..),
+            tmp_y.slice_mut(..),
+            tmp_z.slice_mut(..),
+            tmp_u.slice_mut(..),
+            tmp_v.slice_mut(..),
+            tmp_w.slice_mut(..),
+            tmp_in_e.slice_mut(..),
+        ),
     )?;
-    let Zip7(new_x, new_y, new_z, new_u, new_v, new_w, new_in_e) =
-        exec.alloc::<(f32, f32, f32, f32, f32, f32, f32)>(n)?;
+    let (new_x, new_y, new_z, new_u, new_v, new_w, new_in_e) = alloc_f32x7(exec, n as usize);
     massively::copy_where(
         exec,
-        tmp.slice(..n),
-        massively::lazy::constant(true).take(n),
-        Zip7(
+        zip7(
+            tmp_x.slice(..n as usize),
+            tmp_y.slice(..n as usize),
+            tmp_z.slice(..n as usize),
+            tmp_u.slice(..n as usize),
+            tmp_v.slice(..n as usize),
+            tmp_w.slice(..n as usize),
+            tmp_in_e.slice(..n as usize),
+        ),
+        massively::lazy::constant(1u32).take(n),
+        zip7(
             new_x.slice_mut(..),
             new_y.slice_mut(..),
             new_z.slice_mut(..),

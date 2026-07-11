@@ -11,75 +11,71 @@ pub struct Range {
 
 pub struct OutHi;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_2> for OutHi {
-    type Output = bool;
-    fn apply(inp: f32_2) -> bool {
+impl UnaryOp<f32_2> for OutHi {
+    type Output = u32;
+    fn apply(inp: f32_2) -> u32 {
         let (v, wall) = inp;
-        v > wall
+        if v > wall { 1u32 } else { 0u32 }
     }
 }
 
 pub struct OutLo;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_2> for OutLo {
-    type Output = bool;
-    fn apply(inp: f32_2) -> bool {
+impl UnaryOp<f32_2> for OutLo {
+    type Output = u32;
+    fn apply(inp: f32_2) -> u32 {
         let (v, wall) = inp;
-        v < wall
+        if v < wall { 1u32 } else { 0u32 }
     }
 }
 
 pub struct ReflectHi;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_2> for ReflectHi {
+impl UnaryOp<f32_2> for ReflectHi {
     type Output = f32_1;
     fn apply(inp: f32_2) -> f32_1 {
         let (x, wall) = inp;
         // x - (x-wall)*2
-        let v = wall * 2. - x;
-        (v,)
+        wall * 2. - x
     }
 }
 
 pub struct ReflectLo;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_2> for ReflectLo {
+impl UnaryOp<f32_2> for ReflectLo {
     type Output = f32_1;
     fn apply(inp: f32_2) -> f32_1 {
         let (x, wall) = inp;
         // x + (wall-x)*2
-        let v = wall * 2. - x;
-        (v,)
+        wall * 2. - x
     }
 }
 
 pub struct Negate;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_1> for Negate {
+impl UnaryOp<f32_1> for Negate {
     type Output = f32_1;
     fn apply(inp: f32_1) -> f32_1 {
-        (-inp.0,)
+        -inp
     }
 }
 
 pub struct WrapHi;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_3> for WrapHi {
+impl UnaryOp<f32_3> for WrapHi {
     type Output = f32_1;
     fn apply(inp: f32_3) -> f32_1 {
-        let (x, lo, hi) = inp;
-        let v = x - (hi - lo);
-        (v,)
+        let (x, lo, hi) = flatten3(inp);
+        x - (hi - lo)
     }
 }
 
 pub struct WrapLo;
 #[cube]
-impl<R: Runtime> UnaryOp<R, f32_3> for WrapLo {
+impl UnaryOp<f32_3> for WrapLo {
     type Output = f32_1;
     fn apply(inp: f32_3) -> f32_1 {
-        let (x, lo, hi) = inp;
-        let v = x + (hi - lo);
-        (v,)
+        let (x, lo, hi) = flatten3(inp);
+        x + (hi - lo)
     }
 }

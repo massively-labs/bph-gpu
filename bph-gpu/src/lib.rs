@@ -1,3 +1,5 @@
+#![allow(non_camel_case_types)]
+
 use cubecl::{Runtime, cube, prelude::*};
 use massively::{
     op::{BinaryPredicateOp, ReductionOp, UnaryOp},
@@ -7,25 +9,25 @@ use std::marker::PhantomData;
 
 macro_rules! tuple {
     ($ty:ty, 1) => {
-        ($ty,)
+        $ty
     };
     ($ty:ty, 2) => {
         ($ty, $ty)
     };
     ($ty:ty, 3) => {
-        ($ty, $ty, $ty)
+        (($ty, $ty), $ty)
     };
     ($ty:ty, 4) => {
-        ($ty, $ty, $ty, $ty)
+        ((($ty, $ty), $ty), $ty)
     };
     ($ty:ty, 5) => {
-        ($ty, $ty, $ty, $ty, $ty)
+        (((($ty, $ty), $ty), $ty), $ty)
     };
     ($ty:ty, 6) => {
-        ($ty, $ty, $ty, $ty, $ty, $ty)
+        ((((($ty, $ty), $ty), $ty), $ty), $ty)
     };
     ($ty:ty, 7) => {
-        ($ty, $ty, $ty, $ty, $ty, $ty, $ty)
+        (((((($ty, $ty), $ty), $ty), $ty), $ty), $ty)
     };
 }
 
@@ -39,27 +41,33 @@ type f32_7 = tuple!(f32, 7);
 
 #[cube]
 fn f32_3_add(lhs: f32_3, rhs: f32_3) -> f32_3 {
-    (lhs.0 + rhs.0, lhs.1 + rhs.1, lhs.2 + rhs.2)
+    let (lx, ly, lz) = flatten3(lhs);
+    let (rx, ry, rz) = flatten3(rhs);
+    tuple3(lx + rx, ly + ry, lz + rz)
 }
 
 #[cube]
 fn f32_3_sub(lhs: f32_3, rhs: f32_3) -> f32_3 {
-    (lhs.0 - rhs.0, lhs.1 - rhs.1, lhs.2 - rhs.2)
+    let (lx, ly, lz) = flatten3(lhs);
+    let (rx, ry, rz) = flatten3(rhs);
+    tuple3(lx - rx, ly - ry, lz - rz)
 }
 
 #[cube]
 fn f32_3_div(lhs: f32_3, rhs: f32) -> f32_3 {
-    (lhs.0 / rhs, lhs.1 / rhs, lhs.2 / rhs)
+    let (x, y, z) = flatten3(lhs);
+    tuple3(x / rhs, y / rhs, z / rhs)
 }
 
 #[cube]
 fn f32_3_mul(lhs: f32_3, rhs: f32) -> f32_3 {
-    (lhs.0 * rhs, lhs.1 * rhs, lhs.2 * rhs)
+    let (x, y, z) = flatten3(lhs);
+    tuple3(x * rhs, y * rhs, z * rhs)
 }
 
 #[cube]
 fn f32_safe_div(a: f32, b: f32) -> f32 {
-    if b == 0. { 0. as f32 } else { a / b }
+    if b == 0. { 0_f32 } else { a / b }
 }
 
 pub mod algorithm;

@@ -4,12 +4,12 @@ use super::*;
 /// (u,v,w,m,in_e) -> total e
 pub struct CalcTotalE;
 #[cube]
-impl<R: Runtime> UnaryOp<R, (f32, f32, f32, f32, f32)> for CalcTotalE {
-    type Output = (f32,);
+impl UnaryOp<f32_5> for CalcTotalE {
+    type Output = f32;
     // (u,v,w,m,in_e)
-    fn apply(x: (f32, f32, f32, f32, f32)) -> (f32,) {
-        let (u, v, w, m, in_e) = x;
+    fn apply(x: f32_5) -> f32 {
+        let (u, v, w, m, in_e) = flatten5(x);
         let kin_e = 0.5 * m * (u * u + v * v + w * w);
-        (kin_e + in_e,)
+        kin_e + in_e
     }
 }
