@@ -14,8 +14,8 @@ license = "MIT"
 repository = "https://github.com/akiradeveloper/bph"
 
 [workspace.dependencies]
-massively = { git = "https://github.com/akiradeveloper/massively", tag = "v0.76" }
+massively = { git = "https://github.com/akiradeveloper/massively", tag = "v0.80" }
 clap = { version = "4", features = ["derive"] }
-cubecl = { git = "https://github.com/tracel-ai/cubecl", branch = "main", features = ["wgpu", "cuda", "hip"] }
+cubecl = { git = "https://github.com/tracel-ai/cubecl.git", branch = "main", features = ["wgpu", "cuda", "hip"] }
 
 bph-gpu = { path = "bph-gpu" }

@@ -62,7 +62,7 @@ pub fn alloc_balanced_shell_rand<R: Runtime>(
             cell_ave_v.slice(..),
             cell_ave_w.slice(..),
         ),
-        idx.slice(..),
+        massively::lazy::transform(idx.slice(..), massively::op::U32ToUsize),
     );
 
     crate::algorithm::transform_into(
@@ -123,7 +123,10 @@ pub fn relax<R: Runtime>(
     // Cells with fewer than two particles cannot collide; redistributing their
     // energy would artificially lose energy.
     let collision_stencil = massively::lazy::transform(
-        massively::lazy::permute(cell_cnt.slice(..), idx.slice(..)),
+        massively::lazy::permute(
+            cell_cnt.slice(..),
+            massively::lazy::transform(idx.slice(..), massively::op::U32ToUsize),
+        ),
         IsCollidable,
     );
 
@@ -175,7 +178,7 @@ pub fn relax<R: Runtime>(
         exec,
         zip2(
             cell_sum_total_e.slice(..),
-            massively::lazy::constant(s).take(cell_sum_total_e.len() as u32),
+            massively::lazy::constant(s).take(cell_sum_total_e.len()),
         ),
         DistributeKinE,
         cell_sum_tobe_kin_e.slice_mut(..),
@@ -200,7 +203,10 @@ pub fn relax<R: Runtime>(
             u.slice(..),
             v.slice(..),
             w.slice(..),
-            massively::lazy::permute(cell_vel_ratio.slice(..), idx.slice(..)),
+            massively::lazy::permute(
+                cell_vel_ratio.slice(..),
+                massively::lazy::transform(idx.slice(..), massively::op::U32ToUsize),
+            ),
         ),
         ScaleVelocity,
         zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
@@ -217,7 +223,7 @@ pub fn relax<R: Runtime>(
         exec,
         zip2(
             cell_sum_total_e.slice(..),
-            massively::lazy::constant(s).take(cell_sum_total_e.len() as u32),
+            massively::lazy::constant(s).take(cell_sum_total_e.len()),
         ),
         DistributeInE,
         cell_sum_tobe_in_e.slice_mut(..),
@@ -236,8 +242,8 @@ pub fn relax<R: Runtime>(
     massively::vector::gather_where(
         exec,
         cell_tobe_in_e.slice(..),
-        idx.slice(..),
-        collision_stencil.slice(..),
+        massively::lazy::transform(idx.slice(..), massively::op::U32ToUsize),
+        collision_stencil,
         in_e,
     )
     .unwrap();
@@ -246,9 +252,9 @@ pub fn relax<R: Runtime>(
 struct IsCollidable;
 #[cube]
 impl UnaryOp<u32> for IsCollidable {
-    type Output = u32;
-    fn apply(inp: u32) -> u32 {
-        if inp >= 2 { 1u32 } else { 0u32 }
+    type Output = bool;
+    fn apply(inp: u32) -> bool {
+        inp >= 2
     }
 }
 

@@ -1,0 +1,10 @@
+**
+!paper/
+!paper/paper.tex
+!paper/paper-ja.tex
+!workspace/
+!workspace/plot/
+!workspace/plot/shocktube.jpeg
+!workspace/plot/wallshock.jpeg
+!workspace/plot/sjogreen.jpeg
+!workspace/plot/noh.jpeg

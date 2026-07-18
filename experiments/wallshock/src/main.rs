@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for step in 0..end_step {
         let idx = calc_idx(&exec, &x, &y, &z, dt, n_cell)?;
 
-        let (sorted_idx, sorted_values) = massively::vector::sort_by_key(
+        let (sorted_idx, sorted_values) = bph_gpu::algorithm::sort_by_key_with_keys(
             &exec,
             idx.slice(..),
             zip7(
@@ -105,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 u.slice(..),
                 v.slice(..),
                 w.slice(..),
-                massively::lazy::constant(dt).take(x.len() as u32),
+                massively::lazy::constant(dt).take(x.len()),
             ),
             RungeKutta1::<NoForce>::new(),
             zip6(
@@ -186,9 +186,9 @@ fn calc_idx<R: Runtime>(
         exec,
         zip4(
             x.slice(..),
-            massively::lazy::constant(0.0_f32).take(x.len() as u32),
-            massively::lazy::constant(dt).take(x.len() as u32),
-            massively::lazy::constant(n_cell).take(x.len() as u32),
+            massively::lazy::constant(0.0_f32).take(x.len()),
+            massively::lazy::constant(dt).take(x.len()),
+            massively::lazy::constant(n_cell).take(x.len()),
         ),
         CalcCellIndex1d,
         idx.slice_mut(..),
@@ -205,7 +205,7 @@ fn apply_periodic<R: Runtime>(
     let out_lo = massively::lazy::transform(
         zip2(
             values.slice(..),
-            massively::lazy::constant(lo).take(values.len() as u32),
+            massively::lazy::constant(lo).take(values.len()),
         ),
         OutLo,
     );
@@ -213,8 +213,8 @@ fn apply_periodic<R: Runtime>(
         exec,
         zip3(
             values.slice(..),
-            massively::lazy::constant(lo).take(values.len() as u32),
-            massively::lazy::constant(hi).take(values.len() as u32),
+            massively::lazy::constant(lo).take(values.len()),
+            massively::lazy::constant(hi).take(values.len()),
         ),
         WrapLo,
         out_lo,
@@ -224,7 +224,7 @@ fn apply_periodic<R: Runtime>(
     let out_hi = massively::lazy::transform(
         zip2(
             values.slice(..),
-            massively::lazy::constant(hi).take(values.len() as u32),
+            massively::lazy::constant(hi).take(values.len()),
         ),
         OutHi,
     );
@@ -232,8 +232,8 @@ fn apply_periodic<R: Runtime>(
         exec,
         zip3(
             values.slice(..),
-            massively::lazy::constant(lo).take(values.len() as u32),
-            massively::lazy::constant(hi).take(values.len() as u32),
+            massively::lazy::constant(lo).take(values.len()),
+            massively::lazy::constant(hi).take(values.len()),
         ),
         WrapHi,
         out_hi,
@@ -251,7 +251,7 @@ fn apply_reflect_lo_x<R: Runtime>(
     let out_lo = massively::lazy::transform(
         zip2(
             x.slice(..),
-            massively::lazy::constant(0.0_f32).take(x.len() as u32),
+            massively::lazy::constant(0.0_f32).take(x.len()),
         ),
         OutLo,
     );
@@ -259,7 +259,7 @@ fn apply_reflect_lo_x<R: Runtime>(
     let out_lo = massively::lazy::transform(
         zip2(
             x.slice(..),
-            massively::lazy::constant(0.0_f32).take(x.len() as u32),
+            massively::lazy::constant(0.0_f32).take(x.len()),
         ),
         OutLo,
     );
@@ -267,7 +267,7 @@ fn apply_reflect_lo_x<R: Runtime>(
         exec,
         zip2(
             x.slice(..),
-            massively::lazy::constant(0.0_f32).take(x.len() as u32),
+            massively::lazy::constant(0.0_f32).take(x.len()),
         ),
         ReflectLo,
         out_lo,

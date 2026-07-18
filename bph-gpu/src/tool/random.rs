@@ -11,6 +11,6 @@ pub fn alloc_uniform_random<R: Runtime>(
     let n = x.len();
     let xs = massively::util::random::uniform_f32(range.lo, range.hi, seed)
         .unwrap()
-        .take(n as u32);
+        .take(n);
     crate::algorithm::transform_into(exec, xs, massively::op::Identity, x).unwrap();
 }

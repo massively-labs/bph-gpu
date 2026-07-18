@@ -38,15 +38,15 @@ struct OutOfCircle;
 
 #[cube]
 impl UnaryOp<Tuple7<f32, f32, f32, f32, f32, f32, f32>> for OutOfCircle {
-    type Output = u32;
+    type Output = bool;
 
-    fn apply(input: Tuple7<f32, f32, f32, f32, f32, f32, f32>) -> u32 {
+    fn apply(input: Tuple7<f32, f32, f32, f32, f32, f32, f32>) -> bool {
         let (x, y, z, cx, cy, cz, rad) = flatten7(input);
         let dx = x - cx;
         let dy = y - cy;
         let dz = z - cz;
         let distance = (dx * dx + dy * dy + dz * dz).sqrt();
-        if distance > rad { 1u32 } else { 0u32 }
+        distance > rad
     }
 }
 
@@ -122,9 +122,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             x.slice(..),
             y.slice(..),
             z.slice(..),
-            massively::lazy::constant(center.0).take(x.len() as u32),
-            massively::lazy::constant(center.1).take(x.len() as u32),
-            massively::lazy::constant(center.2).take(x.len() as u32),
+            massively::lazy::constant(center.0).take(x.len()),
+            massively::lazy::constant(center.1).take(x.len()),
+            massively::lazy::constant(center.2).take(x.len()),
         ),
         VelocityTowardCenter,
         zip3(u.slice_mut(..), v.slice_mut(..), w.slice_mut(..)),
@@ -133,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for step in 0..end_step {
         let mass = exec.full(x.len(), 1. as f32)?;
         let idx = calc_idx(&exec, &x, &y, &z, cell_size, width)?;
-        let (sorted_idx, sorted_values) = massively::vector::sort_by_key(
+        let (sorted_idx, sorted_values) = bph_gpu::algorithm::sort_by_key_with_keys(
             &exec,
             idx.slice(..),
             zip7(
@@ -180,7 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 u.slice(..),
                 v.slice(..),
                 w.slice(..),
-                massively::lazy::constant(dt).take(x.len() as u32),
+                massively::lazy::constant(dt).take(x.len()),
             ),
             RungeKutta1::<NoForce>::new(),
             zip6(
@@ -259,8 +259,8 @@ fn calc_idx<R: Runtime>(
             x.slice(..),
             y.slice(..),
             z.slice(..),
-            massively::lazy::constant(cell_size).take(x.len() as u32),
-            massively::lazy::constant(width).take(x.len() as u32),
+            massively::lazy::constant(cell_size).take(x.len()),
+            massively::lazy::constant(width).take(x.len()),
         ),
         CalcCellIndexNoh2d,
         idx.slice_mut(..),
@@ -285,10 +285,10 @@ fn remove_out_of_circle<R: Runtime>(
             x.slice(..),
             y.slice(..),
             z.slice(..),
-            massively::lazy::constant(center.0).take(x.len() as u32),
-            massively::lazy::constant(center.1).take(x.len() as u32),
-            massively::lazy::constant(center.2).take(x.len() as u32),
-            massively::lazy::constant(rad).take(x.len() as u32),
+            massively::lazy::constant(center.0).take(x.len()),
+            massively::lazy::constant(center.1).take(x.len()),
+            massively::lazy::constant(center.2).take(x.len()),
+            massively::lazy::constant(rad).take(x.len()),
         ),
         OutOfCircle,
     );

@@ -53,7 +53,7 @@ experiments:
 1. Allocate particle state arrays on a CubeCL executor.
 2. Initialize positions, velocities, mass, and internal energy.
 3. Compute cell indices from particle positions.
-4. Sort particles by cell using `massively::sort_by_key`.
+4. Sort particles by cell using `massively::vector::sort_by_key`.
 5. Apply the BPH relaxation step with `bph_gpu::bph`.
 6. Stream particles with a first-order Runge-Kutta update.
 7. Apply benchmark-specific boundary conditions and output derived quantities.
@@ -70,7 +70,9 @@ algorithmic primitives such as reduction and bucket counting under
 - Ruby and Rake only if you want to regenerate the checked-in plots through
   `workspace/Rakefile`.
 
-Dependencies on `massively` and `cubecl` are pinned in `Cargo.toml`.
+The `massively` dependency is pinned to v0.80 in `Cargo.toml`; the direct
+`cubecl` dependency follows the matching upstream branch selected by that
+release.
 
 ## Quick Start
 

@@ -8,14 +8,14 @@ pub fn bucket_counting<R: Runtime>(
     out: DeviceSliceMut<u32>,
 ) -> Result<(), massively::Error> {
     let k = out.len();
-    let counting = massively::lazy::counting(0).take(k as u32);
+    let counting = massively::lazy::counting_u32(0).take(k);
 
     let begin = massively::vector::lower_bound(exec, idx.slice(..), counting, OrderingU32)?;
 
     let end = massively::vector::upper_bound(
         exec,
         idx.slice(..),
-        massively::lazy::counting(0).take(k as u32),
+        massively::lazy::counting_u32(0).take(k),
         OrderingU32,
     )?;
 

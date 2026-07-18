@@ -12,10 +12,10 @@ pub fn alloc_shell_rand<R: Runtime>(
     let n = u.len();
     let uniform1 = massively::util::random::uniform_f32(0., 1., seed)
         .unwrap()
-        .take(n as u32);
+        .take(n);
     let uniform2 = massively::util::random::uniform_f32(0., 1., seed.wrapping_add(1))
         .unwrap()
-        .take(n as u32);
+        .take(n);
     crate::algorithm::transform_into(
         exec,
         zip2(uniform1, uniform2),

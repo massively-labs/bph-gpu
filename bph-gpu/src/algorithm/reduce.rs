@@ -15,12 +15,18 @@ where
     Output: MIterMut<R>,
     V: MIter<R, Item = Output::Item>,
     Sum: ReductionOp<Output::Item>,
-    Output::Item: Materializable<R, Materialized = Output::Item>,
+    Output::Item: massively::ToCanonical<R>
+        + massively::WritableFrom<<Output::Item as massively::ToCanonical<R>>::Canonical>,
 {
     let (cell_idx, scratch) =
         massively::vector::reduce_by_key(exec, idx.slice(..), v, Equal, zero, sum)?;
 
-    massively::vector::scatter(exec, scratch.slice(..), cell_idx.slice(..), out)?;
+    massively::vector::scatter(
+        exec,
+        scratch.slice(..),
+        massively::lazy::transform(cell_idx.slice(..), massively::op::U32ToUsize),
+        out,
+    )?;
 
     counting::bucket_counting(exec, idx, counts)
 }

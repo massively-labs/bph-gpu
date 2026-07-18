@@ -41,7 +41,7 @@ pub fn calc_in_e<R: Runtime>(
         exec,
         zip2(
             sum_kinetic_e.slice(..),
-            massively::lazy::constant(s).take(sum_kinetic_e.len() as u32),
+            massively::lazy::constant(s).take(sum_kinetic_e.len()),
         ),
         CalcInE,
         sum_in_e.slice_mut(..),
@@ -59,7 +59,12 @@ pub fn calc_in_e<R: Runtime>(
     .unwrap();
 
     // Permute by particle index and return internal energy for each particle.
-    massively::vector::gather(exec, in_e.slice(..), idx.slice(..)).unwrap()
+    massively::vector::gather(
+        exec,
+        in_e.slice(..),
+        massively::lazy::transform(idx.slice(..), massively::op::U32ToUsize),
+    )
+    .unwrap()
 }
 
 struct CalcInE;

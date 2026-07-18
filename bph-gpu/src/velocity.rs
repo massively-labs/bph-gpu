@@ -58,7 +58,7 @@ pub fn sub_average_velocity<R: Runtime>(
             cell_ave_v.slice(..),
             cell_ave_w.slice(..),
         ),
-        idx.slice(..),
+        massively::lazy::transform(idx.slice(..), massively::op::U32ToUsize),
     )
     .unwrap();
 

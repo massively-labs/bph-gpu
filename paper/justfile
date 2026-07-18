@@ -1,0 +1,9 @@
+default: build
+
+build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}/.."
+    docker build --file paper/Dockerfile \
+        --target artifact --output type=tar,dest=- . \
+        | tar --extract --directory=paper --no-same-owner

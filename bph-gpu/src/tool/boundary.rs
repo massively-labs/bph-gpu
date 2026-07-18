@@ -12,20 +12,20 @@ pub struct Range {
 pub struct OutHi;
 #[cube]
 impl UnaryOp<f32_2> for OutHi {
-    type Output = u32;
-    fn apply(inp: f32_2) -> u32 {
+    type Output = bool;
+    fn apply(inp: f32_2) -> bool {
         let (v, wall) = inp;
-        if v > wall { 1u32 } else { 0u32 }
+        v > wall
     }
 }
 
 pub struct OutLo;
 #[cube]
 impl UnaryOp<f32_2> for OutLo {
-    type Output = u32;
-    fn apply(inp: f32_2) -> u32 {
+    type Output = bool;
+    fn apply(inp: f32_2) -> bool {
         let (v, wall) = inp;
-        if v < wall { 1u32 } else { 0u32 }
+        v < wall
     }
 }
 
